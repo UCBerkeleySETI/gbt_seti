@@ -1,0 +1,9 @@
+1. Define the environment variable SETI_GBT to the location of this package, e.g. export SETI_GBT=/usr/local/src/SETI_GBT
+
+2. Install CFITSIO (http://heasarc.gsfc.nasa.gov/fitsio/)
+
+3. Edit $SETI_GBT/src/Makefile as needed.
+
+4. cd $SETI_GBT/src; make; make clean  (Note: Depending on your system, you may have to set LD_RUN_PATH to properly link slalib.)
+
+
