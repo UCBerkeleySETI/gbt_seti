@@ -6,7 +6,8 @@ import os, re
 
 # Executable locations
 mdsmPipeline = "/home/lessju/Code/MDSM/release/pelican-mdsm/pipelines/sigprocPipeline"
-decimate     = "/home/lessju/Code/sigproc/decimate"
+decimate     = "/home/lessju/Code/SETI/decimate"
+header       = "/home/lessju/Code/sigproc_orig/header"
 logfile      = "logfile.txt"
 
 # Define search parameters here
@@ -94,7 +95,7 @@ def createMDSMConfigFile(configPath, filePrefix, baseDir, startDM, numDMs, dmSte
 def processSigprocHeader(filepath):
 	""" Process sigproc files """
 
-	p = Popen("/home/lessju/Code/sigproc/header %s" % filepath, 
+	p = Popen("%s %s" % (header, filepath), 
 			   shell = True, stdin = PIPE, stdout = PIPE, stderr = STDOUT, close_fds = True)
 	string = p.stdout.read()
 
@@ -153,7 +154,7 @@ if __name__ == "__main__":
 	outputDir = argv[2]
 
 	# Log file
-	logfile = open('logfile, 'w')
+	logfile = open(logfile, 'w')
 
 	# Check if output directory exists
 	if not path.exists(outputDir):
@@ -163,7 +164,7 @@ if __name__ == "__main__":
 	for item in os.listdir(inputDir):
 		if path.isfile(inputDir + '/' + item):
 
-			if path.exists(outputDir + '/' + item) or item not in ["Row_00_8bit.fil"]:# ["B1839+56_8bit.fil"]:
+			if path.exists(outputDir + '/' + item) or item not in ["B1839+56_8bit.fil"]:# ["Row_00_8bit.fil"]:
 				print "Skipping file %s" % (inputDir + '/' + item)
 				continue
 
