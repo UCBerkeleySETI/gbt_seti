@@ -7,7 +7,7 @@ import os, re
 # Executable locations
 mdsmPipeline = "/home/lessju/Code/MDSM/release/pelican-mdsm/pipelines/sigprocPipeline"
 decimate     = "/home/lessju/Code/SETI/decimate"
-header       = "/home/lessju/Code/sigproc_orig/header"
+sheader      = "/home/lessju/Code/sigproc_orig/header"
 logfile      = "logfile.txt"
 
 # Define search parameters here
@@ -16,7 +16,7 @@ numDMs   = [5376, 1600,   1664,   1600,    1408,    1536,     512]
 dmStep   = [0.02, 0.05,   0.1,    0.3,     0.5,     1,        2]
 downsamp = [1,    2,      4,      8,       16,      32,       64]
 
-performDownsamples = 4
+performDownsamples = 7
 nsamp              = 65536
 
 def createPelicanConfigFile(configPath, inputFile, mdsmConfig, outputPrefix, tsamp):
@@ -44,6 +44,12 @@ def createPelicanConfigFile(configPath, inputFile, mdsmConfig, outputPrefix, tsa
 	\t\t</FileDataClient>\n\
 	\t</clients>\n\n\
 	\t<modules>\n\
+    \t\t<RFI_Clipper active="active" channelRejectionRMS="10.0" spectrumRejectionRMS="6.0">\n\
+	\t\t\t<zeroDMing active="true" />\n\
+	\t\t\t<BandPassData file="/home/lessju/Code/SETI/GBTBandPass.bp" />\n\
+	\t\t\t<Band matching="true" startFrequency="1899.804688" endFrequency="1100"/>\n\
+	\t\t\t<History maximum="10000"/>\n\
+   	\t\t</RFI_Clipper>\n\n\
 	\t\t<MdsmModule>\n\
 	\t\t\t<observationfile filepath="%s" />\n\
 	\t\t\t<createOutputBlob value="1" />\n\
@@ -82,7 +88,7 @@ def createMDSMConfigFile(configPath, filePrefix, baseDir, startDM, numDMs, dmSte
     <samples number="%d" />\n\
     <channels number="2048" />\n\
     <timing tsamp="%fe-06" />\n\
-    <detection threshold="5" />\n\
+    <detection threshold="10" />\n\
     <output filePrefix="%s" baseDirectory="%s" secondsPerFile="180" \n\
             usePCTime="0" singleFileMode="1" useKurtosis="0" />\n\
     <gpus ids="0" />\n\
@@ -95,7 +101,7 @@ def createMDSMConfigFile(configPath, filePrefix, baseDir, startDM, numDMs, dmSte
 def processSigprocHeader(filepath):
 	""" Process sigproc files """
 
-	p = Popen("%s %s" % (header, filepath), 
+	p = Popen("%s %s" % (sheader, filepath), 
 			   shell = True, stdin = PIPE, stdout = PIPE, stderr = STDOUT, close_fds = True)
 	string = p.stdout.read()
 
@@ -108,7 +114,7 @@ def processSigprocHeader(filepath):
 	values['nsamp'] = int(re.search("Number of samples\W*:\W*(?P<nsamp>.*)\W*", string).groupdict()['nsamp'])
 	return values	
 
-def createInfFiles(infPath, filename, values):
+def createInfFiles(infPath, filename, values, samples):
 	""" Create inf files for presto post-processing"""
 
 	string = ' Data file name without suffix          =  %s\n\
@@ -133,7 +139,7 @@ def createInfFiles(infPath, filename, values):
  Data analyzed by                       =  Alessio Magro\n\
  Any additional notes:\n\
     Input filterbank samples have 32 bits.' \
-	% (filename, values['ra'], values['dec'], values['time'], values['nsamp'], values['tsamp'], dm )
+	% (filename, values['ra'], values['dec'], values['time'], samples, values['tsamp'], dm )
 
 	f = open(infPath, 'w')
 	f.write(string)
@@ -142,7 +148,7 @@ def createInfFiles(infPath, filename, values):
 if __name__ == "__main__":
 
 	# Read input arguments
-	if len(argv) < 2:
+	if len(argv) < 3:
 		print "Two directories required as arguments"
 		exit(0)
 
@@ -160,11 +166,13 @@ if __name__ == "__main__":
 	if not path.exists(outputDir):
 		os.mkdir(outputDir)
 
+	dedisp = lambda f1, f2, dm, tsamp: 4148.741601 * (f1**-2 - f2**-2) * dm / tsamp
+
 	# Loop over all	 files in input directory
 	for item in os.listdir(inputDir):
 		if path.isfile(inputDir + '/' + item):
 
-			if path.exists(outputDir + '/' + item) or item not in ["B1839+56_8bit.fil"]:# ["Row_00_8bit.fil"]:
+			if path.exists(outputDir + '/' + item) or item not in ["Row_00_8bit.fil"]:
 				print "Skipping file %s" % (inputDir + '/' + item)
 				continue
 
@@ -193,6 +201,9 @@ if __name__ == "__main__":
 				# Extract info from input file
 				header = processSigprocHeader(inputFile)
 
+				if header['nsamp'] < 3e6 and downsamp[i] > 8:
+					nsamp = 65536 / 2
+
 				# Create configuration files			
 				createMDSMConfigFile(currentOutputDir + '/mdsmObs.xml', item[:-4] + '_%d_mdsm' % downsamp[i], 
 									 currentOutputDir, startDM[i], numDMs[i], dmStep[i], header['tsamp'])
@@ -209,12 +220,17 @@ if __name__ == "__main__":
 				# Write inf files
 				for j in range(numDMs[i]):
 					dm = startDM[i] + j * dmStep[i]
-					if int(dm) == dm:
-						createInfFiles(currentOutputDir + '/' + item + '_' + str(int(dm)) + '.inf', 
-									   item + '_' + str(int(dm)) + '.dat', header)
+					if (int(dm)) == dm:
+						dmStr = str(int(dm)) + ".00"
+					elif len(str(dm).split('.')[1]) <= 1:
+						dmStr = str(dm) + "0"
 					else:
-						createInfFiles(currentOutputDir + '/' + item + '_' + str(dm) + '.inf', 
-									   item + '_' + str(dm) + '.inf', header)
+						dmStr = str(dm)
+
+					createInfFiles(currentOutputDir + '/' + item + '_' + dmStr + '.inf', 
+								   item + '_' + dmStr + '.dat', header, 
+								   header['nsamp'] - dedisp(1100, 1900, startDM[i] + numDMs[i] * dmStep[i], 
+								    						header['tsamp'] / 1e6) )
 				logfile.flush()
 
 			logfile.write("%s: Finished processing %s\n\n" % (str(datetime.now()), item))
