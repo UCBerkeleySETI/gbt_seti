@@ -13,15 +13,15 @@ else
         LIBCMD = -dynamiclib
 endif
 
-CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio
+CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql 
 PROGS = test_psrfits_read \
 	raw_quant raw_read rawdopplersearch \
 	treedop raw_head two2eight rawfilterbank raw_ascii2
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
-	guppi_params.o guppi_time.o \
+	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
-	fold.o polyco.o hget.o hput.o sla.o downsample.o
-LIBS = -L$(OPT64)/lib -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lpthread -I/usr/include/cfitsio -lfftw3f
+	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
+LIBS = -L$(OPT64)/lib -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
 all: slalib $(PROGS)
 clean:
 	rm -f $(PROGS) *~ *.o 
