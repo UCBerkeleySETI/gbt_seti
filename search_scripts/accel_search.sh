@@ -13,8 +13,7 @@ export PRESTO=/home/amag0001/presto
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$PRESTO/lib:$PRESTO/lib64:/opt/pgplot
 export SETI=$HOME/SETI
 export REMOTE_DIR=$HOME/SETI/Data/$1/
-export SPLIT=1
-#export SGE_TASK_ID=1
+export SPLIT=0
 
 # List all files to be processed
 files=(`ssh master ls $HOME/SETI/Data/$1/*.dat`)
@@ -62,10 +61,8 @@ do
             $PRESTO/bin/accelsearch -zmax 0 -harmpolish ${chunks[$j]} >> SearchOutput.txt
         done
     else
-        $PRESTO/bin/accelsearch -zmax 0 -harmpolish $filename >> SearchOutput.txt
+        $PRESTO/bin/accelsearch -zmax 0 -harmpolish -flo 0.1 $filename >> SearchOutput.txt
     fi
-
-    echo "Finished $filename: `date`"
 
     # Create tar file with results and copy to remote store
     tar -czf ${filename%\.dat}_ACCEL.tar.gz *ACCEL*
@@ -75,7 +72,7 @@ do
     rm -f ${filename%\.dat}*
 
     # Remove file from remote store
-    ssh master rm $HOME/SETI/Data/$1/$filename
+#    ssh master rm $HOME/SETI/Data/$1/$filename
 
     echo "Finished $filename: `date`"
 done
