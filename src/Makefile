@@ -21,7 +21,7 @@ OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
-LIBS = -L$(OPT64)/lib -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
+LIBS = -L$(OPT64)/lib -lfftw3f_threads -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
 all: slalib $(PROGS)
 clean:
 	rm -f $(PROGS) *~ *.o 
