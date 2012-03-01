@@ -16,4 +16,3 @@ cd ~/SETI/KeplerData
 
 # Use Presto rfifind 
 $PRESTO/bin/rfifind -time 1.5 -o $1 $1
-

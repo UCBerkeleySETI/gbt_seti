@@ -32,7 +32,7 @@ if __name__ == "__main__":
 	if not os.path.exists(infPath):
 		print "%s does not exist" % infPath
 		sys.exit(0)
-	
+
 	# Extract required information
 	inffile  = open(infPath, 'r')
 	inf      = inffile.read()
@@ -40,10 +40,12 @@ if __name__ == "__main__":
 	nsamp    = int(inf.split('\n')[9].split('=')[1])
 	mjd      = float(inf.split('\n')[7].split('=')[1])
 	chunkLen = int(chunk / tsamp)
+        if chunkLen % 2 == 1:
+            chunkLen = chunkLen + 1
 
 	# Perform the split
 	os.system("split -d -b %d %s %s" % (chunkLen * 4, filename, template))
-	
+
 	# Rename files and create inf files for each chunk
 	for i in range(0, int(ceil(nsamp / chunkLen))):
 
@@ -62,17 +64,16 @@ if __name__ == "__main__":
 		f.close()
 
 	# Process last file
-	i = int(ceil(nsamp / chunkLen))
-	if i < 9:
-		name = template + '0' + str(i)
-	else:
-		name = template + str(i)
+#	i = int(ceil(nsamp / chunkLen))
+#	if i < 9:
+#		name = template + '0' + str(i)
+#	else:
+#		name = template + str(i)
 
-	os.system('mv %s %s' % (name, name + '.dat') )
-	text = inf.replace(str(nsamp), str(nsamp - i * chunkLen))
-	text = text.replace(str(mjd), str(mjd + (i * chunkLen * tsamp) / (24.0 * 60 * 60)))
-	f = open(name + '.inf', 'w')
-	f.write(text)
-	f.close()
-		
-	
+#	os.system('mv %s %s' % (name, name + '.dat') )
+#	text = inf.replace(str(nsamp), str(nsamp - i * chunkLen))
+#	text = text.replace(str(mjd), str(mjd + (i * chunkLen * tsamp) / (24.0 * 60 * 60)))
+#	f = open(name + '.inf', 'w')
+#	f.write(text)
+#	f.close()
+

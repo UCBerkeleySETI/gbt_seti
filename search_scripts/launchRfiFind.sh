@@ -16,4 +16,3 @@ do
     qsub $SETI/rfifind.sh ${files[$i]}
   fi
 done
-
