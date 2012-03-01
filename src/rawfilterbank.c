@@ -277,7 +277,8 @@ int main(int argc, char *argv[]) {
 				   fprintf(stderr, "n_dropped: %d\n\n",band[i].gf.n_dropped);
 				   
 				   if (band[i].pf.sub.data) free(band[i].pf.sub.data);
-				   band[i].pf.sub.data  = (unsigned char *) malloc(band[i].pf.sub.bytes_per_subint);
+				   band[i].pf.sub.data  = (unsigned char *) 
+				   (band[i].pf.sub.bytes_per_subint);
 	  
 				   /* Check to see if the current band matches the previous */
 				   if(i > 0) {
@@ -352,6 +353,8 @@ int main(int argc, char *argv[]) {
 
 	printf("Index step: %d\n", indxstep);
 	printf("bytes per subint %d\n",band[first_good_band].pf.sub.bytes_per_subint );
+	printf("spectra per subint %d\n",spectraperint );
+	
 	fflush(stdout);
 
 	fastspectra = (float**) malloc(fnchan * sizeof(float*));  
@@ -366,7 +369,7 @@ int main(int argc, char *argv[]) {
 
 	startindx = band[first_good_band].gf.packetindex;
 	curindx = startindx;
-	
+	int readvalid=0;
 	filecnt = band[first_good_band].filecnt;
 
 	for(i=0;i<8;i++) band[i].curfile = 0;			
@@ -389,7 +392,8 @@ int main(int argc, char *argv[]) {
 
 				  if(band[j].fil){
 						if(fread(buf, sizeof(char), 32768, band[j].fil) == 32768) {
-						
+							readvalid=1;
+							
 							fseek(band[j].fil, -32768, SEEK_CUR);
 							if(vflag>=1) fprintf(stderr, "band: %d length: %d\n", j, gethlength(buf));
 							guppi_read_obs_params(buf, &band[j].gf, &band[j].pf);
@@ -415,10 +419,10 @@ int main(int argc, char *argv[]) {
 								 
 							
 							} else if(band[j].gf.packetindex > curindx) {
-								 fprintf(stderr,"curindx: %Ld, pktindx: %Ld\n", curindx, band[j].gf.packetindex );
+								 fprintf(stderr,"read subint w/ too high an index curindx: %Ld, pktindx: %Ld\n", curindx, band[j].gf.packetindex );
 								 /* read a subint with too high an indx, must have skipped a packet*/
 								 /* do nothing, will automatically have previous spectra (or 0) */
-							} if(band[j].gf.packetindex < curindx) {
+							} else if(band[j].gf.packetindex < curindx) {
 								 fprintf(stderr,"curindx: %Ld, pktindx: %Ld\n", curindx, band[j].gf.packetindex );
 
 								 /* try to read an extra spectra ahead */
@@ -470,8 +474,8 @@ int main(int argc, char *argv[]) {
 		
 		
 
-
-		fprintf(stderr, "dumping to disk\n");
+		if(readvalid == 1) {
+		fprintf(stderr, "Dumping to disk\n");
 
 		/* output one subint of accumulated spectra to filterbank file */
 		for(b=0;b<spectraperint;b++){
@@ -488,6 +492,11 @@ int main(int argc, char *argv[]) {
 		
 		/* made it through all 8 bands, now increment current pkt index */
 		curindx = curindx + indxstep;
+		readvalid = 0;
+		fprintf(stderr, "readvalid = 0\n");
+		fflush(stderr);
+		}
+		
 
 	} while(!(band[0].invalid && band[1].invalid && band[2].invalid && band[3].invalid && band[4].invalid && band[5].invalid && band[6].invalid && band[7].invalid));
 	

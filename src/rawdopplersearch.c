@@ -1,3 +1,4 @@
+#define MULTIFFTW
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -16,6 +17,7 @@
 #include <gsl/gsl_multifit.h>
 #include "barycenter.h"
 #include "rawdopplersearch.h"
+#include <pthread.h>
 
 /* Guppi channel-frequency mapping */
 /* sample at 1600 MSamp for an 800 MHz BW */
@@ -32,11 +34,13 @@ long int lrint(double x);
 
 int exists(const char *fname);
 
+int readbin(long int m, unsigned char *channelbuffer, long long int channelbuffer_pos, char *scratchpath);
+
 double coeff(int *xarray, double *yarray, long long int num, long long int length, int degree, double *fittedvals);
 
 void print_usage(char *argv[]); 
 
-int channelize(unsigned char *channelbuffer, float *spectra, long long int numsamples, int fftlen, fftwf_complex *in, fftwf_complex *out, fftwf_plan *plan_forward);
+int channelize(struct fftinfo *fftparams);
 
 void channels_to_disk(unsigned char *subint, char *scratchpath, long int nchans, long int totsize, long long int chanbytes);
 
@@ -66,7 +70,7 @@ extern void guppi_read_obs_params(char *buf,
                                      struct psrfits *p);
 
 
- long int tophitsearch(float * tree_dedoppler, long int tsteps, long int nframes, long int tdwidth, long int fftlen, long int channel, struct max_vals * max, struct gpu_input *firstinput, char * fitsfield);
+ long int tophitsearch(float * original, float * rfirejected, long int tsteps, long int nframes, long int tdwidth, long int fftlen, long int channel, struct max_vals * max, struct gpu_input *firstinput);
  
 
 
@@ -84,14 +88,15 @@ int N = 128;
 int main(int argc, char *argv[]) {
 
 
+
 	int filecnt=0;
     char buf[32768];
 	
 
 	unsigned char *channelbuffer;
-	float *spectra;
- 	float *spectrum;
- 	float *spectrum_sum;
+	float *spectra = NULL;
+ 	float *spectrum = NULL;
+ 	float *spectrum_sum = NULL;
  	
 	float *bandpass;
 	
@@ -101,6 +106,9 @@ int main(int argc, char *argv[]) {
 	struct gpu_input rawinput;	
 	struct gpu_input firstinput;
 	struct max_vals max;
+	
+	struct fftinfo fftparams;
+
 	
 	max.maxsnr = NULL;
 	max.maxdrift = NULL;
@@ -123,22 +131,20 @@ int main(int argc, char *argv[]) {
 
 	/* de-doppler variables */
     long int tsteps, tsteps_valid;
-    float *tree_dedoppler;
-    float *tree_dedoppler_flip;
+    float *tree_dedoppler = NULL;
+    float *tree_dedoppler_flip = NULL;
+    float *tree_dedoppler_original = NULL;
+    
 	int *drift_indexes;
-	long int *ibrev;
+	long int *ibrev = NULL;
 	long int indx;
 	double drift_rate_resolution;
 	char *rfi_mask = NULL;
 	char *stat_mask = NULL;
 
+	pthread_t channelize_thread;
 
 	
-	
-	quantlookup[0] = 3.3358750;
-   	quantlookup[1] = 1.0;
-   	quantlookup[2] = -1.0;
-   	quantlookup[3] = -3.3358750;
 
     
     
@@ -151,6 +157,8 @@ int main(int argc, char *argv[]) {
 	int c;
 	long int i,j,k,m,n;
     int vflag=0; //verbose
+    
+    unsigned int sqlid = 0;
     
     char *bandpass_file_name=NULL;
     char *partfilename=NULL;
@@ -178,7 +186,7 @@ int main(int argc, char *argv[]) {
 
        opterr = 0;
      
-       while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:")) != -1)
+       while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:m:")) != -1)
          switch (c)
            {
            case 'c':
@@ -187,6 +195,9 @@ int main(int argc, char *argv[]) {
            case 'v':
              vflag = 1;
              break;
+           case 'm':
+             sqlid = atoi(optarg);
+             break;             
            case 'd':
              disk = 1;
              break;             
@@ -249,23 +260,29 @@ if(getenv("SETI_GBT") == NULL){
 	fprintf(stderr, "Error! SETI_GBT not defined!\n");
 	exit(0);
 }
+
 sprintf(tempfilname, "%s/lib/fft_plans/%lld.txt", getenv("SETI_GBT"), fftlen); 
+
+
+#ifdef MULTIFFTW
+fftwf_init_threads();
+fftwf_plan_with_nthreads(4);
+sprintf(tempfilname, "%s/lib/fft_plans/%lld_threaded.txt", getenv("SETI_GBT"), fftlen); 
+#endif
 
 if(!fftwf_import_wisdom_from_filename(tempfilname)) {
 	printf("Couldn't read wisdom file: %s!\n", tempfilname);
 	savewisdom = 1;
 }
 
-fftwf_complex *in;
-fftwf_complex *out;
-fftwf_plan plan_forward;
 
-in = fftwf_malloc ( sizeof ( fftwf_complex ) * fftlen );
-out = fftwf_malloc ( sizeof ( fftwf_complex ) * fftlen );
+
+fftparams.in = fftwf_malloc ( sizeof ( fftwf_complex ) * fftlen );
+fftparams.out = fftwf_malloc ( sizeof ( fftwf_complex ) * fftlen );
 
 fprintf(stderr, "planning fft of length %lld...  this could take a while...\n", fftlen);
 
-plan_forward = fftwf_plan_dft_1d (fftlen, in, out, FFTW_FORWARD, FFTW_PATIENT);
+fftparams.plan_forward = fftwf_plan_dft_1d (fftlen, fftparams.in, fftparams.out, FFTW_FORWARD, FFTW_PATIENT | FFTW_DESTROY_INPUT);
 
 if(savewisdom) fftwf_export_wisdom_to_filename(tempfilname);
 
@@ -369,7 +386,7 @@ if(rawinput.fil){
 	exit(1);
 }
 
-channelbuffer  = (unsigned char *) calloc( lrint( (double) size/((double) rawinput.pf.hdr.nchan)), sizeof(char) );
+channelbuffer  = (unsigned char *) calloc( lrint((double) size/((double) rawinput.pf.hdr.nchan) )   , sizeof(char) );
 printf("malloc'ing %ld Mbytes for processing channel %d\n",  lrint( (double) size/((double) rawinput.pf.hdr.nchan)), channel );	
 
 firstinput = rawinput;
@@ -435,6 +452,8 @@ if(disk) {
 			fprintf(stderr, "Error!  %s exists...  proceeding to file processing... this is a debug mode\n", tempfilname);
 			stat(tempfilname, &st);
 			channelbuffer_pos = st.st_size;
+			if(channelbuffer_pos > lrint((double) size/((double) rawinput.pf.hdr.nchan))) channelbuffer = realloc(channelbuffer, channelbuffer_pos);
+
 	   		rawinput.invalid = 1;
 	   		//exit(1);
 	   }
@@ -684,13 +703,18 @@ barycenter(topotimes, barytimes, voverc, 2, firstinput.pf.hdr.ra_str, firstinput
 firstinput.baryv = voverc[0];
 firstinput.barya = (voverc[0]-voverc[1])/obs_length;
 
+firstinput.sqlid = sqlid;
 printf("start time %15.15Lg end time %15.15Lg %s %s barycentric velocity %15.15g barycentric acceleration %15.15g \n", firstinput.pf.hdr.MJD_epoch, rawinput.pf.hdr.MJD_epoch, firstinput.pf.hdr.ra_str, firstinput.pf.hdr.dec_str, firstinput.baryv, firstinput.barya);
+
+bandpass = (float *) malloc (fftlen * sizeof(float));
+bandpass_file = fopen(bandpass_file_name, "rb");
+fread(bandpass, sizeof(float),fftlen, bandpass_file);
+fclose(bandpass_file);
+
 
 
 
 for (m = 0; m < nfiles; m++) {
-
-	spectra = (float *) malloc (channelbuffer_pos * sizeof(float));
 
 
 	
@@ -703,38 +727,49 @@ for (m = 0; m < nfiles; m++) {
 			} 	
 	
 		channel = m;
-
-/*
-		if(m==7) {
-		 for(i=channelbuffer_pos - 100;i<channelbuffer_pos;i++){
-			 printf("%d 0x%02x\n",i, channelbuffer[i]);
-			 usleep(1000000);
-		 }			
-		 }
-*/		 
+	 
 	}
 
     nframes = (long int) floor(channelbuffer_pos/fftlen);
 
+	if(spectra == NULL) spectra = (float *) malloc (channelbuffer_pos * sizeof(float));
 
-	channelize(channelbuffer, spectra, channelbuffer_pos, fftlen, in, out, &plan_forward);
-	
-	if(bandpass_file_name != NULL) {
-		 fprintf(stderr, "equalizing using bandpass model: %s\n", bandpass_file_name);
-		 bandpass = (float *) malloc (fftlen * sizeof(float));
-		 bandpass_file = fopen(bandpass_file_name, "rb");
-		 fread(bandpass, sizeof(float),fftlen, bandpass_file);
-		 /* equalize all spectra */
-		 for(i = 0; i < nframes; i++){	    
-			 for(j = 0; j < fftlen; j++) spectra[i * fftlen + j] = spectra[i * fftlen + j] / bandpass[j] * 10000000;
-		 }
-		 free(bandpass);
-		 fclose(bandpass_file);
+
+    if(m == 0) {
+		fftparams.spectra = spectra;
+		fftparams.channelbuffer = channelbuffer;
+		fftparams.numsamples = channelbuffer_pos;
+		fftparams.fftlen = fftlen;
+		fftparams.bandpass = bandpass;
+	    //pthread_create(&channelize_thread,NULL,channelize,&fftparams);
 	}
 
 
+
+	fprintf(stderr, "channelizing...\n");
+	//pthread_join(channelize_thread,NULL);
+
+
+	channelize(&fftparams);
+
+
+
+
+/*	
+	if(bandpass_file_name != NULL) {
+		 fprintf(stderr, "equalizing using bandpass model: %s...", bandpass_file_name);
+		 for(i = 0; i < nframes; i++){	    
+			 for(j = 0; j < fftlen; j++) spectra[i * fftlen + j] = spectra[i * fftlen + j] / bandpass[j] * 8388608;
+		 }
+
+	}
+*/
+
+	fprintf(stderr, "done\n");
+
+
 	/* dump to db if requested */
-    rawsql(conn, spectra, fftlen, nframes, &firstinput, channel);
+    //rawsql(conn, spectra, fftlen, nframes, &firstinput, channel);
 
 
   	long int decimate_factor=0;
@@ -761,9 +796,6 @@ for (m = 0; m < nfiles; m++) {
 
 
 
-
-
-
 	if(padleft == NULL && padright == NULL) {
 		padleft = (float*) malloc(tsteps * 4 * tsteps_valid * sizeof(float));
 		padright = (float*) malloc(tsteps * 4 * tsteps_valid * sizeof(float));
@@ -774,33 +806,44 @@ for (m = 0; m < nfiles; m++) {
 
 
 
-	
-	drift_indexes = (int *) calloc(tsteps_valid, sizeof(int));
 
 
 
 	tdwidth = fftlen + (8 * tsteps);
 
-	spectrum = (float *) malloc (tdwidth * sizeof(float));
+	if(spectrum == NULL) {
+		spectrum = (float *) malloc (tdwidth * sizeof(float));
+		spectrum_sum = (float *) malloc (tdwidth * sizeof(float));
 
-	spectrum_sum = (float *) malloc (tdwidth * sizeof(float));
+	}
+
+	//memset(spectrum, 0x0, tdwidth * sizeof(float));
 
 
-	memset(spectrum, 0x0, tdwidth * sizeof(float));
 
-
-
+if(tree_dedoppler == NULL) {
 	/* allocate array for dedopplering */
 	tree_dedoppler = (float*) malloc(tsteps * tdwidth * sizeof(float));
 
 	/* init dedopplering array to zero */
 	memset(tree_dedoppler, 0x0, sizeof(float) * tsteps * tdwidth);  //initialize dedoppler correction arrays
 
+	/* allocate array for holding original */
+	tree_dedoppler_original = (float*) malloc(tsteps * tdwidth * sizeof(float));
+
+
+}
 
 
 
-	/* build index mask for in-place tree doppler correction */
+
+
+
+if(ibrev == NULL) {
+
+	/* build index mask for in-place tree doppler correction */	
 	ibrev = (long int *) calloc(tsteps, sizeof(long int));
+	drift_indexes = (int *) calloc(tsteps_valid, sizeof(int));
 	
 	for (i=0; i<tsteps; i++) {
 		ibrev[i] = bitrev((long int) i, (long int) log2((double) tsteps));
@@ -831,15 +874,20 @@ for (m = 0; m < nfiles; m++) {
 	
 	}
 
+}
 
 
 
+		 
+//for(j=0;j<(tsteps*4);j++) tree_dedoppler[tdwidth*i+j] = padleft[(i * (tsteps*4)) + j];
+//		for(j=fftlen + (tsteps * 4);j<(tdwidth);j++) tree_dedoppler[tdwidth*i+j] = padright[(i * (tsteps*4)) + j];
+//		for(j=(tsteps*4);j<(tdwidth - (tsteps*4));j++) tree_dedoppler[i*tdwidth+j] = spectra[(fftlen*i) + (j-(tsteps*4))]; 
 
 
 	for(i=0;i<nframes;i++){
-		for(j=0;j<(tsteps*4);j++) tree_dedoppler[tdwidth*i+j] = padleft[(i * (tsteps*4)) + j];
-		for(j=fftlen + (tsteps * 4);j<(tdwidth);j++) tree_dedoppler[tdwidth*i+j] = padright[(i * (tsteps*4)) + j];
-		for(j=(tsteps*4);j<(tdwidth - (tsteps*4));j++) tree_dedoppler[i*tdwidth+j] = spectra[(fftlen*i) + (j-(tsteps*4))]; 
+		  memcpy(tree_dedoppler + (tdwidth*i), padleft + (i * tsteps * 4), tsteps * 4 * sizeof(float));
+		  memcpy(tree_dedoppler + (tdwidth*i) + fftlen + (tsteps * 4), padright + (i * tsteps * 4), tsteps * 4*sizeof(float));
+		  memcpy(tree_dedoppler + (tdwidth*i) + (tsteps * 4), spectra + (fftlen * i), fftlen*sizeof(float));			
 	}
 
 
@@ -852,21 +900,23 @@ for (m = 0; m < nfiles; m++) {
   	//memcpy(tree_dedoppler, spectra, nframes * fftlen * sizeof(float));
 	
 
-	/* free original array */
-	free(spectra);	
 
 
+	/* allocate array for negative doppler rates */
+	tree_dedoppler_flip = (float*) malloc(tsteps * tdwidth * sizeof(float));
 
 
 
 	 /* malloc stat mask if we need to */
-	 if(stat_mask == NULL) stat_mask = (char *) malloc(tdwidth * sizeof(char));
-
-	/* zero out stat mask */
-	 memset(stat_mask, 0x0, tdwidth);
-	 for (i = 0; i < (tsteps * 4);i++) stat_mask[i] = 1;
-	 for (i = (tdwidth - (tsteps*4)); i < tdwidth;i++) stat_mask[i] = 1;
-
+	 if(stat_mask == NULL) {
+		  stat_mask = (char *) malloc(tdwidth * sizeof(char));
+	 
+		 /* zero out stat mask */
+		  memset(stat_mask, 0x0, tdwidth);
+		  for (i = 0; i < (tsteps * 4);i++) stat_mask[i] = 1;
+		  for (i = (tdwidth - (tsteps*4)); i < tdwidth;i++) stat_mask[i] = 1;
+	 }
+	 
 	 /* malloc rfi mask if we need to */
 	 if(rfi_mask == NULL) rfi_mask = (char *) malloc(tdwidth * sizeof(char));
 
@@ -884,16 +934,19 @@ for (m = 0; m < nfiles; m++) {
 //void rfirej(float *tree_dedoppler, char *rfi_mask, long int tdwidth, long int nframes, long int tsteps, long int rfiwindow, long int rfithresh)
 
 	
-	/* allocate array for negative doppler rates */
-	tree_dedoppler_flip = (float*) malloc(tsteps * tdwidth * sizeof(float));
+
+
+
+	/* populate original array */
+	memcpy(tree_dedoppler_original, tree_dedoppler, tsteps * tdwidth * sizeof(float));
+
+	fprintf(stderr, "Running interference rejection\n");
+
+	rfirej(tree_dedoppler, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
 
 	/* populate neg doppler array */
 	memcpy(tree_dedoppler_flip, tree_dedoppler, tsteps * tdwidth * sizeof(float));
 
-
-	fprintf(stderr, "Running interference rejection\n");
-	rfirej(tree_dedoppler, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
-	
 
 	fprintf(stderr, "Doppler correcting forward...\n");
 	taylor_flt(tree_dedoppler, tsteps * tdwidth, tsteps);
@@ -915,8 +968,8 @@ for (m = 0; m < nfiles; m++) {
 
 
 		/* normalize */
-		for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] - mean;
-		for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] / stddev;		
+		for(i=0;i<tdwidth;i++) spectrum[i] = (spectrum[i] - mean)/stddev;
+		//for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] / stddev;		
 		
 		//m = 0, 2t -> -4t forward 
 		//m = 0, 2t -> -4t reverse
@@ -934,7 +987,8 @@ for (m = 0; m < nfiles; m++) {
 		 
 		 
 		fprintf(stderr, "found %ld candidates at drift rate %15.15g\n", \
-			candsearch(spectrum, specstart, specend, candthresh, k*drift_rate_resolution, &firstinput, fftlen, tdwidth, channel, &max, 0), k*drift_rate_resolution);
+		candsearch(spectrum, specstart, specend, candthresh, k*drift_rate_resolution, &firstinput, fftlen, tdwidth, channel, &max, 0) \
+		, k*drift_rate_resolution);
 		 
 	}
 
@@ -943,7 +997,7 @@ for (m = 0; m < nfiles; m++) {
 	/* copy back original array */
 	memcpy(tree_dedoppler, tree_dedoppler_flip, tsteps * tdwidth * sizeof(float));
 
-	rfirej(tree_dedoppler_flip, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
+	//rfirej(tree_dedoppler_flip, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
 
 
 	/* Flip matrix across X dimension to search negative doppler drift rates */
@@ -965,8 +1019,8 @@ for (m = 0; m < nfiles; m++) {
 
 
 		/* normalize */
-		for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] - mean;
-		for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] / stddev;		
+		for(i=0;i<tdwidth;i++) spectrum[i] = (spectrum[i] - mean)/stddev;
+		//	for(i=0;i<tdwidth;i++) spectrum[i] = spectrum[i] / stddev;		
 		
 		//m = 0, 2t -> -4t forward
 		//m = 0, 2t -> -4t reverse
@@ -985,62 +1039,74 @@ for (m = 0; m < nfiles; m++) {
 		
 		
 		
-		fprintf(stderr, "found %ld candidates at drift rate %15.15g\n", \
-			candsearch(spectrum, specstart, specend, candthresh, -1*k*drift_rate_resolution, &firstinput, fftlen, tdwidth, channel, &max, 1), -1*k*drift_rate_resolution);
+		//fprintf(stderr, "found %ld candidates at drift rate %15.15g\n",
+		
+		candsearch(spectrum, specstart, specend, candthresh, -1*k*drift_rate_resolution, &firstinput, fftlen, tdwidth, channel, &max, 1);
+		//, -1*k*drift_rate_resolution);
 			
 
 		
 	}
 
 
-
-	//char sqltable[255];
-	//sprintf(sqltable, "fitsimage_raw");
-	
-	fprintf(stderr, "inserted %ld candidates\n", tophitsearch(tree_dedoppler, tsteps, nframes, tdwidth, fftlen, channel, &max, &firstinput, "fitsimage_raw"));
-	
-	rfirej(tree_dedoppler, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
-
-	fprintf(stderr, "inserted %ld candidates\n", tophitsearch(tree_dedoppler, tsteps, nframes, tdwidth, fftlen, channel, &max, &firstinput, "fitsimage_rej"));
-
-
-
-
-	indx  = (ibrev[drift_indexes[0]] * tdwidth); //get index for dedoppler = 0 Hz/sec drift rate
-
-
-	if(m==0) {	
-		 partfil = fopen(partfilename, "w");	
-		 for(j=(tsteps*4);j<(tdwidth-(tsteps*4));j++) fprintf(partfil, "%15.15f %15.15f %15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df), tree_dedoppler[indx+j], spectrum[j], spectrum_sum[j- (tsteps*2)]);
-		 for(j=(tsteps*4);j<(tdwidth-(tsteps*4));j++) fprintf(partfil, "%15.15f %15.15f %15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df), tree_dedoppler_flip[indx+j], spectrum[j], spectrum_sum[j- (tsteps*2)]);
-
-		 fclose(partfil);
-	}
-	
 	free(tree_dedoppler_flip);
-	free(tree_dedoppler);
-	free(ibrev);
-	free(drift_indexes);
-	free(spectrum);
-	free(spectrum_sum);
+
+
+	fprintf(stderr, "inserted %ld candidates\n", tophitsearch(tree_dedoppler_original, tree_dedoppler, tsteps, nframes, tdwidth, fftlen, channel, &max, &firstinput));
+	
+//	fprintf(stderr, "inserted %ld candidates\n", tophitsearch(tree_dedoppler, tsteps, nframes, tdwidth, fftlen, channel, &max, &firstinput, "fitsimage_raw"));
+	
+//	rfirej(tree_dedoppler, rfi_mask, tdwidth, nframes, tsteps, rfiwindow, rfithresh);
+
+//	fprintf(stderr, "inserted %ld candidates\n", tophitsearch(tree_dedoppler, tsteps, nframes, tdwidth, fftlen, channel, &max, &firstinput, "fitsimage_rej"));
+
+
+
+
+//	indx  = (ibrev[drift_indexes[0]] * tdwidth); //get index for dedoppler = 0 Hz/sec drift rate
+
+
+//	if(m==0) {	
+//		 partfil = fopen(partfilename, "w");	
+//		 for(j=(tsteps*4);j<(tdwidth-(tsteps*4));j++) fprintf(partfil, "%15.15f %15.15f %15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df), tree_dedoppler[indx+j], spectrum[j], spectrum_sum[j- (tsteps*2)]);
+//		 for(j=(tsteps*4);j<(tdwidth-(tsteps*4));j++) fprintf(partfil, "%15.15f %15.15f %15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df), tree_dedoppler_flip[indx+j], spectrum[j], spectrum_sum[j- (tsteps*2)]);
+//
+//		 fclose(partfil);
+//	}
+	
+
+
+
 }
 
+	free(spectra);	
 
-
+	free(spectrum);
+	free(spectrum_sum);
+	
 	/* subtract mean */
 	/* divide by rms */
-
-	free(channelbuffer);
+	free(tree_dedoppler_original);
+	free(tree_dedoppler);
 	
+	free(channelbuffer);
+	free(bandpass);
+	free(ibrev);
+	free(drift_indexes);
 
+	fftwf_free(fftparams.in);
+	fftwf_free(fftparams.out);
+	fftwf_destroy_plan(fftparams.plan_forward);
+	
+	fprintf(stderr, "cleaned up FFTs...\n");
 
 	
 	
 	
 		
-	indx  = (ibrev[0] * fftlen); //get index for dedoppler = 0 Hz/sec drift rate
+//	indx  = (ibrev[0] * fftlen); //get index for dedoppler = 0 Hz/sec drift rate
 
-	fprintf(stderr, "0 Hz/sec index: %ld\n", indx);
+//	fprintf(stderr, "0 Hz/sec index: %ld\n", indx);
 
 
 
@@ -1049,20 +1115,15 @@ for (m = 0; m < nfiles; m++) {
 	
 	
 	
-	partfil = fopen(partfilename, "w");	
-	for(j = 0; j < fftlen; j++) {		
-		fprintf(partfil, "%15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df)  , spectrum[j]);		
-	}
-	fclose(partfil);
+//	partfil = fopen(partfilename, "w");	
+//	for(j = 0; j < fftlen; j++) {		
+//		fprintf(partfil, "%15.15f %15.15f\n", (rawinput.pf.hdr.fctr - 50) + ((j * rawinput.pf.hdr.df)/fftlen) + (channel * rawinput.pf.hdr.df)  , spectrum[j]);		
+//	}
+//	fclose(partfil);
 
 
 	fprintf(stderr, "closed output file...\n");
 
-	fftwf_free(in);
-	fftwf_free(out);
-	fftwf_destroy_plan(plan_forward);
-	
-	fprintf(stderr, "cleaned up FFTs...\n");
 
     exit(1);
 
@@ -1091,15 +1152,24 @@ void bin_print_verbose(unsigned char x)
 
 
 /* we'll need to pass the channel array,  */
+//int channelize(unsigned char *channelbuffer, float *spectra, long long int numsamples, int fftlen, fftwf_complex *in, fftwf_complex *out, fftwf_plan *plan_forward)
 
-int channelize(unsigned char *channelbuffer, float *spectra, long long int numsamples, int fftlen, fftwf_complex *in, fftwf_complex *out, fftwf_plan *plan_forward)
+int channelize(struct fftinfo *fftparams)
 {
 int i,j,k;
+
+float quantlookup[4];
+
+quantlookup[0] = 3.3358750;
+quantlookup[1] = 1.0;
+quantlookup[2] = -1.0;
+quantlookup[3] = -3.3358750;
+
 
 /* number of fft frames in channel buffer */
 long long int numframes;
 
-numframes = (long long int) floor(numsamples/fftlen);
+numframes = (long long int) floor(fftparams->numsamples/fftparams->fftlen);
 
 
 
@@ -1113,35 +1183,36 @@ fprintf(stderr, "executing fft over %lld frames \n", numframes);
 
 for(i = 0; i < numframes; i++) {
 
-	for(k = 0; k < fftlen; k++) {
-		in[k][0] = (channelbuffer[ k + (i * fftlen) ] >> (0 * 2) & 1) +  (2 * (channelbuffer[ k + (i * fftlen) ] >> (0 * 2 + 1) & 1)); //real pol 0
-		in[k][1] = (channelbuffer[ k + (i * fftlen) ] >> (1 * 2) & 1) +  (2 * (channelbuffer[ k + (i * fftlen) ] >> (1 * 2 + 1) & 1)); //imag pol 0
+	for(k = 0; k < fftparams->fftlen; k++) {
+		fftparams->in[k][0] = quantlookup[(fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (0 * 2) & 1) +  (2 * (fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (0 * 2 + 1) & 1))]   ; //real pol 0
+		fftparams->in[k][1] = quantlookup[(fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (1 * 2) & 1) +  (2 * (fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (1 * 2 + 1) & 1))]   ; //imag pol 0
 	}
 
-   	fftwf_execute ( *plan_forward );
+   	fftwf_execute ( fftparams->plan_forward );
 
-	for(k=0;k<fftlen;k++){
-		spectra[ (k) + (i * fftlen) ] = powf(out[(k+fftlen/2)%fftlen][0],2) + powf(out[(k+fftlen/2)%fftlen][1],2);  /*real^2 + imag^2 for pol 0 */
+	for(k=0;k<fftparams->fftlen;k++){
+		fftparams->spectra[ (k) + (i * fftparams->fftlen) ] = powf(fftparams->out[(k+fftparams->fftlen/2)%fftparams->fftlen][0],2) + powf(fftparams->out[(k+fftparams->fftlen/2)%fftparams->fftlen][1],2);  /*real^2 + imag^2 for pol 0 */
 	}	
 
-	for(k = 0; k < fftlen; k++) {
-		in[k][0] = (channelbuffer[ k + (i * fftlen) ] >> (2 * 2) & 1) +  (2 * (channelbuffer[ k + (i * fftlen) ] >> (2 * 2 + 1) & 1)); //real pol 1
-		in[k][1] = (channelbuffer[ k + (i * fftlen) ] >> (3 * 2) & 1) +  (2 * (channelbuffer[ k + (i * fftlen) ] >> (3 * 2 + 1) & 1)); //imag pol 1
+	for(k = 0; k < fftparams->fftlen; k++) {
+		fftparams->in[k][0] = quantlookup[(fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (2 * 2) & 1) +  (2 * (fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (2 * 2 + 1) & 1))]   ; //real pol 1
+		fftparams->in[k][1] = quantlookup[(fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (3 * 2) & 1) +  (2 * (fftparams->channelbuffer[ k + (i * fftparams->fftlen) ] >> (3 * 2 + 1) & 1))]   ; //imag pol 1
 	}
 
-    fftwf_execute ( *plan_forward );
+    fftwf_execute ( fftparams->plan_forward );
 
-	for(k=0;k<fftlen;k++){
-		spectra[ (k) + (i * fftlen) ] = spectra[ (k) + (i * fftlen) ] + powf(out[(k+fftlen/2)%fftlen][0],2) + powf(out[(k+fftlen/2)%fftlen][1],2);  /*real^2 + imag^2 for pol 1 */
+	for(k=0;k<fftparams->fftlen;k++){
+		fftparams->spectra[ (k) + (i * fftparams->fftlen) ] = (fftparams->spectra[ (k) + (i * fftparams->fftlen) ] + powf(fftparams->out[(k+fftparams->fftlen/2)%fftparams->fftlen][0],2) + powf(fftparams->out[(k+fftparams->fftlen/2)%fftparams->fftlen][1],2))/fftparams->bandpass[k];  /*real^2 + imag^2 for pol 1 */
 	}
 	
 
 	/* set the DC channel equal to the mean of the two adjacent channels */
-	spectra[ (fftlen/2) + (i * fftlen) ] = (spectra[ (fftlen/2) + (i * fftlen) - 1 ] + spectra[ (fftlen/2) + (i * fftlen) + 1])/2;
+	fftparams->spectra[ (fftparams->fftlen/2) + (i * fftparams->fftlen) ] = (fftparams->spectra[ (fftparams->fftlen/2) + (i * fftparams->fftlen) - 1 ] + fftparams->spectra[ (fftparams->fftlen/2) + (i * fftparams->fftlen) + 1])/2;
 	
 			
 
 }	
+
 
 
 
@@ -1493,7 +1564,7 @@ int readbin(long int m, unsigned char *channelbuffer, long long int channelbuffe
 	 return 1;
 }
 
-int comp_stats(double *mean, double *stddev, float *vec, long int veclen, char *ignore){
+void comp_stats(double *mean, double *stddev, float *vec, long int veclen, char *ignore){
 
 	//compute mean and stddev of floating point vector vec, ignoring elements in ignore != 0
 	long int i,j,k;
@@ -1502,29 +1573,27 @@ int comp_stats(double *mean, double *stddev, float *vec, long int veclen, char *
 	long int valid_points=0;
 	
 	
-	for(i=0;i<veclen;i++) {
-		if(ignore[i] == 0) valid_points++;
-	}
 	
 	
 	for(i=0;i<veclen;i++) {
-		if(ignore[i] == 0) tmean = tmean + vec[i];
+		if(ignore[i] == 0) {
+			tmean = tmean + (double) vec[i];
+			tstddev = tstddev + ((double) vec[i] * vec[i]);
+			valid_points++;
+		}
 	}
 	
 
+	tstddev = pow((tstddev - ((tmean * tmean)/valid_points))/(valid_points - 1), 0.5);
 	tmean = tmean / (valid_points);
 	
-	for(i=0;i<veclen;i++) {
-		if(ignore[i] == 0) tstddev = tstddev + pow((vec[i] - tmean), 2);
-	}
 	
 	
-	tstddev = pow( (1/ ((double) (valid_points - 1)) * tstddev), 0.5);
 	
 	*mean = tmean;
 	*stddev = tstddev;
+
 	
-	return 0;
 }
 
 
@@ -1712,9 +1781,9 @@ void rawsql(MYSQL  *conn, float *spectra, long int fftlen, long int nframes, str
 		comp_stats(&mean, &stddev, spectrum, fftlen, rfi_mask);
 
 		/* normalize */
-		for(j=0;j<fftlen;j++) spectrum[j] = spectrum[j] - mean;
+		for(j=0;j<fftlen;j++) spectrum[j] = (spectrum[j] - mean)/stddev;
 
-		for(j=0;j<fftlen;j++) spectrum[j] = spectrum[j] / stddev;	
+		//for(j=0;j<fftlen;j++) spectrum[j] = spectrum[j] / stddev;	
 
 		for(j=0;j<fftlen;j++){
 			
@@ -1811,8 +1880,8 @@ void rfirej(float *tree_dedoppler, char *rfi_mask, long int tdwidth, long int nf
 	fprintf(stderr, "normalizing\n");
 	
 	 /* normalize */
-	 for(i=0;i<tdwidth;i++) spectrum_sum[i] = spectrum_sum[i] - mean;
-	 for(i=0;i<tdwidth;i++) spectrum_sum[i] = spectrum_sum[i] / stddev;
+	 for(i=0;i<tdwidth;i++) spectrum_sum[i] = (spectrum_sum[i] - mean)/stddev;
+//	 for(i=0;i<tdwidth;i++) spectrum_sum[i] = spectrum_sum[i] / stddev;
 
 
 	j=0;
@@ -1823,6 +1892,7 @@ void rfirej(float *tree_dedoppler, char *rfi_mask, long int tdwidth, long int nf
 	 for(i=0;i<tdwidth;i++) {
 		 if(spectrum_sum[i] > rfithresh){
 		 	rfi_mask[i] = 1; 
+	 		//fprintf(stderr, "%d\n", i);
 	 		j++;
 	 	}
 	 }	
@@ -1831,8 +1901,10 @@ void rfirej(float *tree_dedoppler, char *rfi_mask, long int tdwidth, long int nf
 	 
 	 fflush(stdout);
 
-	/* median filter */
 
+
+
+	/* median filter */
 
 	for(i=0;i<tdwidth;i++) {
 		for(j=0;j<nframes;j++) {
@@ -1868,6 +1940,9 @@ void rfirej(float *tree_dedoppler, char *rfi_mask, long int tdwidth, long int nf
 	free(spectrum);
 	free(channel);
 	free(channelmedians);
+	#ifdef MULTIFFTW
+	fftwf_cleanup_threads();
+	#endif
 }
 
 
@@ -1877,9 +1952,9 @@ unsigned long int sqlinsert(float snr, double topofreq, double baryfreq, float d
 	char query[1024];
 		//dump this candidate!
 		sprintf(query, "INSERT INTO hits \
-		(ra, decl, snr, mjd, topofreq, baryfreq, finebw, src_name, az, za, baryv, barya) \
+		(ra, decl, snr, mjd, topofreq, baryfreq, finebw, drift, src_name, az, za, baryv, barya, observation_id) \
 		VALUES (%15.15f, %15.15f, %15.15f, %15.15Lf, %15.15f, %15.15f, \
-		%15.15f, \"%s\", %15.15f, %15.15f, %15.20f, %15.20f)",\
+		%15.15f, %15.15f, \"%s\", %15.15f, %15.15f, %15.20f, %15.20f, %d)",\
 		firstinput->pf.sub.ra, \
 		firstinput->pf.sub.dec, \
 		snr, \
@@ -1887,13 +1962,15 @@ unsigned long int sqlinsert(float snr, double topofreq, double baryfreq, float d
 		topofreq, \
 		baryfreq, \
 		(double) firstinput->pf.hdr.df * 1000000.0 / (double) fftlen, \
+		drift_rate, \
 		firstinput->pf.hdr.source, \
 		firstinput->pf.hdr.azimuth, \
 		firstinput->pf.hdr.zenith_ang, \
 		firstinput->baryv, \
-		firstinput->barya); 
+		firstinput->barya, \
+		firstinput->sqlid); 
 		if (mysql_query(conn,query)){
-			fprintf(stderr, "Error inserting raw hit into sql database...\n");
+			fprintf(stderr, "Error inserting hit into sql database...\n");
 			exiterr(3);
 		}
 
@@ -1915,31 +1992,56 @@ long int candsearch(float * spectrum, long int specstart, long int specend, int 
 			long int i, j, k;
 			unsigned long int used_id;
 			j=0;
-			for(i=specstart;i<specend;i++) {
-
 			
-				
-				 if(spectrum[i] > candthresh) {
-					 k=i;
-					 if(reverse) k = (tdwidth - 1 - i);
-					 
-					 used_id = sqlinsert(spectrum[i], chan_freq(firstinput, fftlen, channel, k, tdwidth, 0), \
-					 	chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, fftlen, firstinput);
-					 	
-					 	
-					 //printf("%lu %15.15g  %g %g %ld\n", used_id, chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, spectrum[i], i);
-					  j++;
-					  if(spectrum[i] > max->maxsnr[k]) {
-						   max->maxsnr[k] = spectrum[i];
-						   max->maxdrift[k] = drift_rate;
-					  	   max->maxid[k] = used_id;
-					  }
+			
+			
+			if(reverse) {
+				  for(i=specstart;i<specend;i++) {			
 					  
-				  
-				 }
+					  if(spectrum[i] > candthresh) {
+
+						   k = (tdwidth - 1 - i);
+						   
+						   used_id = sqlinsert(spectrum[i], chan_freq(firstinput, fftlen, channel, k, tdwidth, 0), \
+							  chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, fftlen, firstinput);
+							  
+							  
+						   //printf("%lu %15.15g  %g %g %ld\n", used_id, chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, spectrum[i], i);
+							j++;
+							if(spectrum[i] > max->maxsnr[k]) {
+								 max->maxsnr[k] = spectrum[i];
+								 max->maxdrift[k] = drift_rate;
+								 max->maxid[k] = used_id;
+							}
+							
+						
+					   }
+				  }
+
+			} else {
+				  for(i=specstart;i<specend;i++) {			
+					  
+					  if(spectrum[i] > candthresh) {
+						   k=i;
+						   
+						   used_id = sqlinsert(spectrum[i], chan_freq(firstinput, fftlen, channel, k, tdwidth, 0), \
+							  chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, fftlen, firstinput);
+							  
+							  
+						   //printf("%lu %15.15g  %g %g %ld\n", used_id, chan_freq(firstinput, fftlen, channel, k, tdwidth, 1), drift_rate, spectrum[i], i);
+							j++;
+							if(spectrum[i] > max->maxsnr[k]) {
+								 max->maxsnr[k] = spectrum[i];
+								 max->maxdrift[k] = drift_rate;
+								 max->maxid[k] = used_id;
+							}
+							
+						
+					   }
+				  }			
+						
+			
 			}
-
-
 		
 		return j;		
 		}
@@ -1948,7 +2050,7 @@ long int candsearch(float * spectrum, long int specstart, long int specend, int 
 
 	/* top hit search - grab top hits, make fits files, push them into the database */
 
-long int tophitsearch(float * tree_dedoppler, long int tsteps, long int nframes, long int tdwidth, long int fftlen, long int channel, struct max_vals * max, struct gpu_input *firstinput, char * fitsfield) {
+long int tophitsearch(float * original, float *rfirejected, long int tsteps, long int nframes, long int tdwidth, long int fftlen, long int channel, struct max_vals * max, struct gpu_input *firstinput) {
 	
 	long int i,j,k, m, n;	
 	char skip=0;
@@ -1979,10 +2081,11 @@ long int tophitsearch(float * tree_dedoppler, long int tsteps, long int nframes,
 	memset(sqlquery, 0x0, 2*fitslen + 1025);
 	memset(candidatedata, 0x0, nframes*tsteps*4*sizeof(float));
 	k=0;
+	
 for(i=0;i<tdwidth;i++) {	
 				
 		/* if not interference and we found a candidate */
-		if (max->maxsnr[i] > 0) {
+		if (max->maxsnr[i] > 0 && fabsf(max->maxdrift[i]) < 0.01) {
 		
 				//printf("checking...\n");
 				/* check to see if this is the top candidate within a window 2*tsteps wide */
@@ -1993,7 +2096,7 @@ for(i=0;i<tdwidth;i++) {
 				if(ubound > tdwidth) ubound = tdwidth;
 				skip=0;
 				
-				if (fabsf(max->maxdrift[i]) < 0.01) skip = 1;
+				//if () skip = 1;
 				
 				for(j = lbound; j < i; j++) {	
 					if(max->maxsnr[j] > max->maxsnr[i]) {
@@ -2021,28 +2124,36 @@ for(i=0;i<tdwidth;i++) {
 					   
 						   
 					   for(n=0;n<nframes;n++) {
-						   for(j=lbound;j<ubound;j++) candidatedata[ (n * tsteps * 4) + (j - (i-(tsteps*2)))] = tree_dedoppler[(n * tdwidth) + j];
+						   for(j=lbound;j<ubound;j++) candidatedata[ (n * tsteps * 4) + (j - (i-(tsteps*2)))] = original[(n * tdwidth) + j];
 					   }
 					   								   								   			
 					   
 					   simple_fits_buf(fitsdata, candidatedata, nframes, (4 * tsteps), chan_freq(firstinput, fftlen, channel, i, tdwidth, 1), fftlen, max->maxsnr[i], max->maxdrift[i], firstinput);
-					   								   								   			
-					   //sprintf(candidatefilename, "%g_%15.15g_%g.fits", max->maxsnr[i], chan_freq(firstinput, fftlen, channel, i, tdwidth, 1), max->maxdrift[i]);
-
-					   //printf("%s\n", candidatefilename);
-
-					   //candidatefile = fopen(candidatefilename, "w");
 
 
 					   mysql_real_escape_string(conn, sqldata, fitsdata, fitslen);
-					  // char *stmnt = "UPDATE hits SET %s='%s' WHERE hitid=%ld";
-					   //querylen = snprintf(sqlquery, sizeof(stat)+sizeof(chunk) , stat, chunk);
-
 					   
-					   querylen = sprintf(sqlquery, "UPDATE hits SET tophit=1, %s='%s' WHERE hitid=%ld", fitsfield, sqldata, max->maxid[i]);
+					   querylen = sprintf(sqlquery, "UPDATE hits SET tophit=1, %s='%s' WHERE hitid=%ld", "fitsimage_raw", sqldata, max->maxid[i]);
 					   //printf("querylen is %d for %ld\n", querylen, max->maxid[i]);
 					   mysql_real_query(conn, sqlquery, (long int) querylen);
 
+
+
+					   for(n=0;n<nframes;n++) {
+						   for(j=lbound;j<ubound;j++) candidatedata[ (n * tsteps * 4) + (j - (i-(tsteps*2)))] = rfirejected[(n * tdwidth) + j];
+					   }
+					   								   								   			
+					   
+					   simple_fits_buf(fitsdata, candidatedata, nframes, (4 * tsteps), chan_freq(firstinput, fftlen, channel, i, tdwidth, 1), fftlen, max->maxsnr[i], max->maxdrift[i], firstinput);
+
+
+					   mysql_real_escape_string(conn, sqldata, fitsdata, fitslen);
+
+
+					   querylen = sprintf(sqlquery, "UPDATE hits SET tophit=1, %s='%s' WHERE hitid=%ld", "fitsimage_rej", sqldata, max->maxid[i]);
+
+					   mysql_real_query(conn, sqlquery, (long int) querylen);
+					   
 					   k++;
 
 
@@ -2058,6 +2169,7 @@ free(candidatedata);
 
 return k;		
 }
+
 
 
 
