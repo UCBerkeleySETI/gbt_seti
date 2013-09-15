@@ -78,7 +78,20 @@ if fil.nbits == 8
 
 
 elseif fil.nbits == 32
-	data = fread(fid, [fil.nchan, fil.nsamp], 'single');
+
+
+	if (samps ~= fil.nsamp)
+		fseek(fid, fil.nchan * (tstart - 1) * 4, 0);	
+	end
+	
+	if chanstart > 0
+		data = fread(fid, chanstart - 1, '*single');
+	end
+	
+	[num2str(chans),'*single']
+	nskip = fil.nchan - chans;
+	data = fread(fid, [chans, samps], [num2str(chans),'*single'], nskip*4);
+
 end
 fclose(fid);
 
