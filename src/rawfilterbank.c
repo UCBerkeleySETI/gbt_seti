@@ -61,7 +61,6 @@ int main(int argc, char *argv[]) {
 
 
 	float **fastspectra;
-	
 
 	/* total number of channels in the filterbank - 256 channelized by guppi * second SW stage */
 	/* really should pull this out of the .raw files */	
@@ -313,6 +312,12 @@ int main(int argc, char *argv[]) {
 	az_start=0.0;
 	za_start=0.0;
     strcpy(ifstream,"YYYY");
+    
+    
+    
+    
+    
+    
 
 	memset(buf, 0x0, 32768);
 	strcat(buf, strtok(band[first_good_band].pf.hdr.ra_str, ":"));
@@ -544,18 +549,39 @@ float fitsval;
 unsigned int quantval;
 long int bytes_per_chan;
 float samples[4096][4];
+int kurtosis_rfi_rejection = 0;
+long int kofst  = ofst * pf->hdr.nchan * N;
+float **kurtosis;
+
+if(kurtosis_rfi_rejection) {
+	 kurtosis = (float**) malloc(pf->hdr.nchan * N * sizeof(float*));  
+	 for (i = 0; i < (pf->hdr.nchan * N); i++) fastspectra[i] = (float*) malloc(spectraperint*sizeof(float));
+}
 
 
+/* fastspectra[channels][time] */
         
 bytes_per_chan =  pf->sub.bytes_per_subint/pf->hdr.nchan;
 
 /* buffer up one accumulation worth of complex samples */
 /* either detect and accumulate, or fft, detect and accumulate */
 
+
+for(j = (ofst * pf->hdr.nchan * N); j < ((ofst+1) * pf->hdr.nchan * N); j = j + 1) {	 			 	 
+	 for(k=0;k<spectraperint;k++){
+	 
+		//kurtosis[j + i - kofst][k] =  
+
+	}
+}
+
 	 for(j = (ofst * pf->hdr.nchan * N); j < ((ofst+1) * pf->hdr.nchan * N); j = j + N) {	 			 	 
 		 for(k=0;k<spectraperint;k++){
 			  
  			  for(i = 0; i < N; i++) fastspectra[j+i][k] = 0;
+				
+			  	
+	 		  if(kurtosis_rfi_rejection) for(i = 0; i < N; i++) kurtosis[j + i - kofst][k] = 0;
 
 			  for(i = 0; i < ftacc;i++) {
 				  /* sum FTACC dual pol complex samples */ 		
@@ -588,6 +614,8 @@ bytes_per_chan =  pf->sub.bytes_per_subint/pf->hdr.nchan;
 						 } else {
 							  fastspectra[j+i][k] = fastspectra[j+i][k] + powf((powf(out[(i+N/2)%N][1],2) + powf(out[(i+N/2)%N][1],2)),2);						 
 						 }
+						 if(kurtosis_rfi_rejection) kurtosis[j + i - kofst][k] = kurtosis[j + i - kofst][k]  + powf((powf(out[(i+N/2)%N][1],2) + powf(out[(i+N/2)%N][1],2)),2);  
+
 					 }				
 					 
 					 for(i=0;i<N;i++){
@@ -605,8 +633,9 @@ bytes_per_chan =  pf->sub.bytes_per_subint/pf->hdr.nchan;
 							  fastspectra[j+i][k] = fastspectra[j+i][k] + powf((powf(out[(i+N/2)%N][1],2) + powf(out[(i+N/2)%N][1],2)),2);						 
 						 }
 
-					 }						 
+						 if(kurtosis_rfi_rejection) kurtosis[j + i - kofst][k] = kurtosis[j + i - kofst][k]  + powf((powf(out[(i+N/2)%N][1],2) + powf(out[(i+N/2)%N][1],2)),2);  
 
+					 }						 
 
 			  }			 	  	
 

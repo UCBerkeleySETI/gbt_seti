@@ -260,5 +260,6 @@ set(figure1, 'PaperPosition', [0.5,0.5,11,5.0]);
 %set(figure1, 'PaperPosition', [0.5,0.5,9,5.8]);
 set(gcf, 'InvertHardCopy', 'off');
 
-print('-depsc2', strcat(plname,'.eps'));
+print('-depsc', strcat(plname,'.eps'));
+%print('-dtiff', strcat(plname,'.tiff'));
 %close(gcf)

@@ -32,6 +32,7 @@ fil.tobs=str2num(out{18}(3:end))
 fil.nbits=str2num(out{19}(3:end))
 fil.ifs=str2num(out{20}(3:end))
 
+
 if (~exist('chanstart', 'var'))
     chanstart = 1;
 end
@@ -48,6 +49,7 @@ if (~exist('tend', 'var'))
     tend = fil.nsamp;
 end
 
+fil.freq = fil.freq + (fil.bw * (chanstart-1))
 
 chans = chanend-(chanstart-1);
 samps = (tend - (tstart - 1));
