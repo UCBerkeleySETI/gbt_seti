@@ -49,6 +49,10 @@ if (~exist('tend', 'var'))
     tend = fil.nsamp;
 end
 
+if abs(fil.bw) < 0.001
+    fil.bw = -1.0/fil.tsamp;
+end
+
 fil.freq = fil.freq + (fil.bw * (chanstart-1))
 
 chans = chanend-(chanstart-1);
