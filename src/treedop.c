@@ -189,7 +189,7 @@ for(i = 0; i< 512;i++){
 	tree_dedisperse[i]=(float*) malloc(ydim * sizeof(float));
 }
 */
-fftwf_import_wisdom_from_filename("/home/siemion/sw/kepler/treedop_wisdom.txt");
+fftwf_import_wisdom_from_file("/home/siemion/sw/kepler/treedop_wisdom.txt");
 in = fftwf_malloc ( sizeof ( fftwf_complex ) * ydim );
 out = fftwf_malloc ( sizeof ( fftwf_complex ) * ydim );
 plan_forward = fftwf_plan_dft_1d ( ydim, in, out, FFTW_FORWARD, FFTW_PATIENT);

@@ -1,4 +1,4 @@
-OPT64 = /home/pulsar64
+OPT64 = /opt/vegas
 FC = gfortran
 FFLAGS = -g -fPIC
 OS = Linux
@@ -16,12 +16,12 @@ endif
 CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql 
 PROGS = test_psrfits_read \
 	raw_quant raw_read rawdopplersearch \
-	treedop obs_db_update raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2
+	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
-LIBS = -L$(OPT64)/lib -lfftw3f_threads -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
+LIBS = -L$(OPT64)/lib -I$(OPT64)/include -lfftw3f_threads -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
 all: slalib $(PROGS)
 clean:
 	rm -f $(PROGS) *~ *.o 

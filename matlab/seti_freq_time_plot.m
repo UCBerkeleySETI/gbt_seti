@@ -8,12 +8,12 @@ stop = 1.0;
 
 
 if (~exist('plname', 'var'))
-    plname = 'TestPLOT';
+    plname = 'VOYAGER I';
 end
 
 
 
-plotcol='light';
+plotcol='dark';
 data = fil.data;
 
 %header = fitsinfo(inputfits);
@@ -62,19 +62,20 @@ deltaf;
 
 size(data,1)
 size(data,2)
-doppler = 2500000000;
+doppler = 0;
 doppler=0;
 deltat
 stepsize = abs(round(doppler * size(data,1) * deltat/(deltaf * 1000000))); 
 b = size(data,2) * deltaf * 1000000
-
+stepsize
 if doppler < 0
-for j=(size(data,2) - stepsize - 3):-1:(stepsize + 3)
+for j=(size(data,2)):-1:stepsize+1
+	%j
    line = getline(data, j, j-stepsize, 0);		
-   dedop(j-stepsize-2) = sum(line);
+   dedop(j-stepsize) = sum(line);
 end
-dedop(1:stepsize+3) = 0;
-dedop((size(data,2)-stepsize-3):size(data,2)) = 0;
+dedop(1:stepsize+1) = 0;
+dedop((size(data,2)-stepsize-1):size(data,2)) = 0;
 
 else
 
@@ -167,8 +168,11 @@ set(xlabh,'Position',get(xlabh,'Position') + [0 3 0])
 txtx
 txty
 txty = txty - 0.38; %y size of txt box
-snrtext = ['SNR: ', num2str(snr)]; 
-drifttext = ['Drift: ',num2str(doppler),' Hz/sec'];
+%snrtext = ['SNR: ', num2str(snr)]; 
+%drifttext = ['Drift: ',num2str(doppler),' Hz/sec'];
+snrtext = '';
+drifttext='';
+
 %    [txtx txty 0.35 0.2],...
 
 % Create rectangle
@@ -182,7 +186,7 @@ annotation(figure1,'textbox',...
     [txtx txty 0.35 0.38],...
     'String',{,['Telescope: ',fil.telescope],['MJD: ',num2str(mjd)],['RA: ',ra],['DEC: ',dec], [''],['F_{ctr}: ', num2str(fcntr, 11), ' MHz'], drifttext, snrtext},...
     'FontWeight','bold',...
-    'FontSize',11,...
+    'FontSize',13,...
     'FontName','Times',...
     'FitBoxToText','off',...
     'EdgeColor','none',...
@@ -210,7 +214,7 @@ y = [a b];
 
 %plot(x,y,'LineWidth',10,'LineStyle','-','Color',[0 0.800000011920929 0.800000011920929]);
     
-
+if abs(doppler) > 0
 plot(x,y,'Parent',axes1,...
     'MarkerFaceColor',dopplercolor,...
     'MarkerEdgeColor',dopplercolor,...
@@ -219,6 +223,8 @@ plot(x,y,'Parent',axes1,...
     'LineStyle','--',...
     'Color',dopplercolor);
         
+end
+
 axes2 = axes('Parent',figure1,'ZColor',[0 0 0],'YGrid','off',...
     'Position',[leftmargin 0.165 0.774 0.22],...
     'YColor',textcolor,...
@@ -259,6 +265,10 @@ set(figure1, 'PaperPosition', [0.5,0.5,11,5.0]);
 %set(figure1, 'PaperPosition', [0.5,0.5,9,5.8]);
 set(gcf, 'InvertHardCopy', 'off');
 
+%exportfig(1,'test3.eps','width',5,'color','rgb');
+%plot2svg('test.svg');
+set(gcf,'renderer','painters')
+%set(gcf,'renderer','zbuffer');
 print('-depsc', strcat(plname,'.eps'));
 %print('-dtiff', strcat(plname,'.tiff'));
 %close(gcf)

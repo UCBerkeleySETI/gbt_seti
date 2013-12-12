@@ -50,7 +50,7 @@ if (~exist('tend', 'var'))
 end
 
 if abs(fil.bw) < 0.001
-    fil.bw = -1.0/fil.tsamp;
+    fil.bw = -1.0/fil.tsamp*3;
 end
 
 fil.freq = fil.freq + (fil.bw * (chanstart-1))

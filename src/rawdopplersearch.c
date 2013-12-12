@@ -270,7 +270,7 @@ fftwf_plan_with_nthreads(4);
 sprintf(tempfilname, "%s/lib/fft_plans/%lld_threaded.txt", getenv("SETI_GBT"), fftlen); 
 #endif
 
-if(!fftwf_import_wisdom_from_filename(tempfilname)) {
+if(!fftwf_import_wisdom_from_file(tempfilname)) {
 	printf("Couldn't read wisdom file: %s!\n", tempfilname);
 	savewisdom = 1;
 }
@@ -284,7 +284,7 @@ fprintf(stderr, "planning fft of length %lld...  this could take a while...\n", 
 
 fftparams.plan_forward = fftwf_plan_dft_1d (fftlen, fftparams.in, fftparams.out, FFTW_FORWARD, FFTW_PATIENT | FFTW_DESTROY_INPUT);
 
-if(savewisdom) fftwf_export_wisdom_to_filename(tempfilname);
+if(savewisdom) fftwf_export_wisdom_to_file(tempfilname);
 
 
 
