@@ -1,8 +1,10 @@
 /* generate a filterbank-format header for appending to an existing time/frequency dataset */
 /* Example: */
 /*  ./filterbank_header -o blah -nifs 1 -fch1 1420 -source B0329+54 -filename foobar.bin */
--telescope ARECIBO -src_raj 032900 -src_dej 540000 -tsamp 65 -foff 0.25 -nbits 8  */
+-telescope ARECIBO -src_raj 032900 -src_dej 540000 -tsamp 65 -foff -0.25 -nbits 8  */
 -nchans 1024 -tstart 53543.23 */
+/* filterbank-format data should be in descending frequency order, and foff should be < 0 */
+/* 8-bit data are interpreted as unsigned integers, 32-bit data are interpreted as IEEE floats */
 
 #include <stdio.h>
 #include <stdlib.h>
