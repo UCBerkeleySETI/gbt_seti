@@ -842,10 +842,10 @@ fitsdata = malloc((chanbytes * nchans * sizeof(float)) + 2880 * 2);
 
 if(gpu_spec->channelbuffer_pos == 0) {
 	 gpu_spec->rawinput->pf.sub.offs = (double) nchans / (double) (gpu_spec->rawinput->pf.hdr.BW * 1000000) * (double) chanbytes * (double) (gpu_spec->channelbuffer_pos + 0.5);
-	 fitslen = simple_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN * nchans, 0.0, 0.0, gpu_spec->rawinput);
+	 fitslen = simple_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN, 0.0, 0.0, gpu_spec->rawinput);
 } else {
  	 gpu_spec->rawinput->pf.sub.offs = (double) nchans / (double) (gpu_spec->rawinput->pf.hdr.BW * 1000000) * (double) chanbytes * (double) (gpu_spec->channelbuffer_pos);
-	 fitslen = extension_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN * nchans, 0.0, 0.0, gpu_spec->rawinput);
+	 fitslen = extension_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN, 0.0, 0.0, gpu_spec->rawinput);
 }
 
 fwrite(fitsdata, sizeof(char), fitslen, outputfile);
@@ -918,7 +918,7 @@ memset(buf, 0x0, 2880);
 	hadd(buf, "XTENSION");
 
 
-	hputc(buf, "XTENSION", "IMAGE");
+	hputs(buf, "XTENSION", "IMAGE");
 	hputi4(buf, "BITPIX", -32);
 	hputi4(buf, "NAXIS", 2);
 	hputi4(buf, "NAXIS1", width);
@@ -935,7 +935,7 @@ memset(buf, 0x0, 2880);
 	hputnr8(buf, "DEC", 12, firstinput->pf.sub.dec);
 	hputnr8(buf, "DOPPLER", 12, doppler);
 	hputnr8(buf, "SNR", 12, snr);
-	hputc(buf, "SOURCE", firstinput->pf.hdr.source);
+	hputs(buf, "SOURCE", firstinput->pf.hdr.source);
 
 	memcpy(fitsdata, buf, 2880 * sizeof(char));
 	fitslen = fitslen + 2880;
@@ -1003,7 +1003,7 @@ memset(buf, 0x0, 2880);
 	hputnr8(buf, "DEC", 12, firstinput->pf.sub.dec);
 	hputnr8(buf, "DOPPLER", 12, doppler);
 	hputnr8(buf, "SNR", 12, snr);
-	hputc(buf, "SOURCE", firstinput->pf.hdr.source);
+	hputs(buf, "SOURCE", firstinput->pf.hdr.source);
 
 	memcpy(fitsdata, buf, 2880 * sizeof(char));
 	fitslen = fitslen + 2880;
