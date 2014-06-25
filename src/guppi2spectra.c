@@ -94,6 +94,7 @@ struct gpu_spectrometer {
 	 float * spectra;
 	 float * bandpassd;
 	 struct gpu_input * rawinput;
+	 unsigned int gpudevice;
 };
 
 
@@ -196,6 +197,9 @@ int main(int argc, char *argv[]) {
 	rawinput.fil = NULL;
 	rawinput.invalid = 0;
 	rawinput.first_file_skip = 0;
+
+	/* set default gpu device */
+	gpu_spec.gpudevice = 0;
 	
 	long int fftlen;
 	fftlen = 32768;
@@ -212,7 +216,7 @@ int main(int argc, char *argv[]) {
 
        opterr = 0;
      
-       while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:")) != -1)
+       while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:g:")) != -1)
          switch (c)
            {
            case 'c':
@@ -229,6 +233,9 @@ int main(int argc, char *argv[]) {
              break;             
            case 's':
              scratchpath = optarg;
+             break;
+           case 'g':
+             gpu_spec.gpudevice = atoi(optarg);
              break;
            case 'V':
              vflag = 2;
@@ -277,6 +284,7 @@ if(getenv("SETI_GBT") == NULL){
 
 
 
+
 /* load lookup table into GPU memory */
 
 float lookup[4];
@@ -286,6 +294,11 @@ float lookup[4];
  lookup[3] = -3.3358750;
 
 setQuant(lookup);
+
+if (cudaSetDevice(gpu_spec.gpudevice) != cudaSuccess){
+	fprintf(stderr, "Couldn't set GPU device %d\n", gpu_spec.gpudevice);
+	exit(0);
+}
 
 HANDLE_ERROR ( cudaThreadSynchronize() );
 /* --------------------------------- */
