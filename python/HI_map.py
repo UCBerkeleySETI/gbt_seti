@@ -40,6 +40,7 @@ import re
 from astro.coord import ang_sep
 import gc
 import os
+import numpy as np
 
 def remove_fits( location='/fast_scratch/ishivvers/tmp/'):
     '''Deletes fits files from location'''
@@ -262,12 +263,14 @@ def get_spectra(srchstr='/disks/sting/kepler_disk_*/disk_*/gpu4/*_Row_*.0000.raw
         cpu_thread = Thread( target=deal_with_spectra, args=(rawfile, freqw, freqc) )
         cpu_thread.start()
 
-def test_row_complete( firstRaw, ntables_needed=1000 ):
+def test_row_complete( firstRaw, ntables_needed=1500 ):
     """
     Tests whether or not at least most of a row has been run.
     """
     res = DB.log.find_one( {'rawfile':firstRaw} )
     if res == None:
+        return False
+    elif res.get('tables') == None:
         return False
     elif len(res['tables']) < ntables_needed:
         return False
