@@ -1,5 +1,6 @@
 #include <cuda.h>
 #include "guppi2spectra_gpu.h"
+#include <stdio.h>
 
 extern "C" void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 extern "C" void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
