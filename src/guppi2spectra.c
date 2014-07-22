@@ -280,8 +280,12 @@ if(getenv("SETI_GBT") == NULL){
 	exit(0);
 }
 
+if (cudaSetDevice(gpu_spec.gpudevice) != cudaSuccess){
+        fprintf(stderr, "Couldn't set GPU device %d\n", gpu_spec.gpudevice);
+        exit(0);
+}
 
-
+HANDLE_ERROR ( cudaThreadSynchronize() );
 
 
 
@@ -294,11 +298,6 @@ float lookup[4];
  lookup[3] = -3.3358750;
 
 setQuant(lookup);
-
-if (cudaSetDevice(gpu_spec.gpudevice) != cudaSuccess){
-	fprintf(stderr, "Couldn't set GPU device %d\n", gpu_spec.gpudevice);
-	exit(0);
-}
 
 HANDLE_ERROR ( cudaThreadSynchronize() );
 /* --------------------------------- */
