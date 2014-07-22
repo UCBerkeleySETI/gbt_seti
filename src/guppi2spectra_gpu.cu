@@ -82,7 +82,12 @@ void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *band
 
 
 void setQuant(float *lut) {
-	cudaMemcpyToSymbol("gpu_qlut", lut, 16, 0, cudaMemcpyHostToDevice);
+#if CUDA_VERSION >= 4500
+        fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol(gpu_qlut, lut, 16, 0, cudaMemcpyHostToDevice)));
+#else
+        fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol("gpu_qlut", lut, 16, 0, cudaMemcpyHostToDevice)));
+#endif
+
 }
 
 void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth) {
