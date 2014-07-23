@@ -3,6 +3,8 @@ FC = gfortran
 FFLAGS = -g -fPIC
 OS = Linux
 BINDIR = $(SETI_GBT)/bin
+CUDA = /opt/vegas/cuda
+CUDAC = $(CUDA)/bin/nvcc
 # Linux is the first choice
 ifeq ($(OS),Linux)
         LIBSUFFIX = .so
@@ -13,16 +15,16 @@ else
         LIBCMD = -dynamiclib
 endif
 
-CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql 
+CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include 
 PROGS = test_psrfits_read \
 	raw_quant raw_read rawdopplersearch \
-	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2
+	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2 
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
-LIBS = -L$(OPT64)/lib -I$(OPT64)/include -lfftw3f_threads -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient 
-all: slalib $(PROGS)
+LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -L$(SETI_GBT)/lib -lsla -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart
+all: slalib $(PROGS) gpu
 clean:
 	rm -f $(PROGS) *~ *.o 
 INSTALL_DIR = ../bin
@@ -36,6 +38,9 @@ libsla$(LIBSUFFIX):
 	cd slalib ; $(FC) $(FFLAGS) -fno-second-underscore -c -I. *.f *.F
 	rm slalib/sla_test.o
 	cd slalib ; $(FC) $(LIBCMD) -o $(SETI_GBT)/lib/libsla$(LIBSUFFIX) -fno-second-underscore *.o
+gpu: 
+	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o
+	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o $(BINDIR)/gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
 
 .SECONDEXPANSION:
 $(PROGS): $$@.c $(OBJS)
