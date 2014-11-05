@@ -43,7 +43,7 @@ int main(int argc, char *argv[]) {
         int               header_size;    //                                                            need for gbt data
         int               data_size;      //                                                            need for gbt data
         char              name[36];       //                                                            need for gbt data
-        int               channel;        //                                                            need for gbt data
+		int               channel;        //                                                            need for gbt data
 		int 			  polarization;    // which pol?  0 or 1
         double            data_time;      // time stamp : the final data sample in this block           need for gbt data
         double            coord_time;     // time stamp : ra/dec (ie, the time of Az/Za acquisition)    need for gbt data - 
