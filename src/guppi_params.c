@@ -185,9 +185,17 @@ void guppi_read_subint_params(char *buf,
         get_int("NPOLYCO", p->fold.n_polyco_sets, 0);
     } else {
         int bytes_per_dt = p->hdr.nchan * p->hdr.npol * p->hdr.nbits / 8;
+		
+		/* correction: reduce packetsize for 2 bit mode */	
+
         p->sub.offs = p->hdr.dt * 
+            (double)(g->packetindex * (g->packetsize / (8/p->hdr.nbits)) / bytes_per_dt)
+            + 0.5 * p->sub.tsubint;
+
+/*        p->sub.offs = p->hdr.dt * 
             (double)(g->packetindex * g->packetsize / bytes_per_dt)
             + 0.5 * p->sub.tsubint;
+*/
         p->fold.n_polyco_sets = 0;
     }
 

@@ -3,7 +3,7 @@ FC = gfortran
 FFLAGS = -g -fPIC
 OS = Linux
 BINDIR = $(SETI_GBT)/bin
-CUDA = /opt/vegas/cuda
+CUDA = /usr/local/cuda
 CUDAC = $(CUDA)/bin/nvcc
 # Linux is the first choice
 ifeq ($(OS),Linux)
@@ -17,7 +17,7 @@ endif
 
 CFLAGS = -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include 
 PROGS = test_psrfits_read \
-	raw_quant raw_read rawdopplersearch \
+	raw_quant raw_read rawdopplersearch raw2wu \
 	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2 
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
@@ -41,6 +41,7 @@ libsla$(LIBSUFFIX):
 gpu: 
 	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o
 	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o $(BINDIR)/gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
+	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2wu.c -o $(BINDIR)/guppi2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
 
 .SECONDEXPANSION:
 $(PROGS): $$@.c $(OBJS)

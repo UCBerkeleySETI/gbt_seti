@@ -508,15 +508,15 @@ if(firsttime) {
 	  fclose(bandpass_file);
 	  if(vflag>=1) fprintf(stderr,"creating plan for %d point fft with batch size %d\n", gpu_spec.cufftN, gpu_spec.cufftbatchSize);
 
-	  HANDLE_ERROR( cufftPlan1d(&(gpu_spec.plan), gpu_spec.cufftN, CUFFT_C2C, gpu_spec.cufftbatchSize) );
+//	  HANDLE_ERROR( cufftPlan1d(&(gpu_spec.plan), gpu_spec.cufftN, CUFFT_C2C, gpu_spec.cufftbatchSize) );
 
 	  //gpu_spec.a_h = (cufftComplex *)malloc(gpu_spec.nBytes);
-	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.a_d), gpu_spec.nBytes) ); 
-	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.channelbufferd),  indxstep * rawinput.gf.packetsize / 4) );  
-	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.bandpassd), fftlen * sizeof(float)) );
-	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.spectrumd), gpu_spec.cufftbatchSize * fftlen * sizeof(float)) );
+//	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.a_d), gpu_spec.nBytes) ); 
+//	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.channelbufferd),  indxstep * rawinput.gf.packetsize / 4) );  
+//	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.bandpassd), fftlen * sizeof(float)) );
+//	  HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec.spectrumd), gpu_spec.cufftbatchSize * fftlen * sizeof(float)) );
 
-	  HANDLE_ERROR( cudaMemcpy(gpu_spec.bandpassd, bandpass, fftlen * sizeof(float), cudaMemcpyHostToDevice) ); 
+//	  HANDLE_ERROR( cudaMemcpy(gpu_spec.bandpassd, bandpass, fftlen * sizeof(float), cudaMemcpyHostToDevice) ); 
 
 	  gpu_spec.channelbuffer = channelbuffer;
 	  gpu_spec.channelbuffer_pos = 0;
@@ -540,7 +540,6 @@ if(firsttime) {
 						 fprintf(stderr, "subintoffset %f\n", rawinput.pf.sub.offs);
 						 fprintf(stderr, "tsubint %f\n", rawinput.pf.sub.tsubint);
 
-
 					}
 					
 			   		if(rawinput.gf.packetindex == curindx) {
@@ -559,7 +558,7 @@ if(firsttime) {
 							}
 						 	if(vflag>=1) fprintf(stderr, "copied %lld bytes\n", chanbytes * rawinput.pf.hdr.nchan);
 						 	if(vflag>=1) fprintf(stderr, "calling channels_to_disk...");
-						 	channels_to_disk(channelbuffer, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
+						 	//channels_to_disk(channelbuffer, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
 
 						 	if(vflag>=1) fprintf(stderr, "done\n");
 
@@ -580,7 +579,7 @@ if(firsttime) {
 
 						/* channelbuffer *should* still contain the last valid subint */
 						 	
-						channels_to_disk(rawinput.pf.sub.data, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
+						//channels_to_disk(rawinput.pf.sub.data, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
 	
 						/* We'll get the current valid subintegration again during the next time through this loop */
 
@@ -615,7 +614,7 @@ if(firsttime) {
 									 }
 									 if(vflag>=1) fprintf(stderr, "copied %lld bytes\n", chanbytes * rawinput.pf.hdr.nchan);
 													
-									 channels_to_disk(channelbuffer, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
+									 //channels_to_disk(channelbuffer, &gpu_spec, nchans, rawinput.pf.sub.bytes_per_subint, chanbytes);
 								  
 								  
 								  } else {
