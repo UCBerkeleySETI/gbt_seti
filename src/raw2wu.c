@@ -40,17 +40,17 @@ int main(int argc, char *argv[]) {
 	/* header structure */
 	
 	struct seti_data {
-        int               header_size;    //                                                            need for gbt data
-        int               data_size;      //                                                            need for gbt data
-        char              name[36];       //                                                            need for gbt data
-		int               channel;        //                                                            need for gbt data
-		int 			  polarization;    // which pol?  0 or 1
-        double            data_time;      // time stamp : the final data sample in this block           need for gbt data
-        double            coord_time;     // time stamp : ra/dec (ie, the time of Az/Za acquisition)    need for gbt data - 
-        double            ra;             // ra for the beam from which the data in this block came     need for gbt data
-        double            dec;            // dec for the beam from which the data in this block came    need for gbt data
-        long              sky_freq;       // aka center frequency, Hz                                   need for gbt data
-        double            samplerate;     //                                                            need for gbt data		
+        int               	header_size;    //                                                            need for gbt data
+        int               	data_size;      //                                                            need for gbt data
+        char              	name[36];       //                                                            need for gbt data
+		int               	channel;        //                                                            need for gbt data
+		int					polarization;    // which pol?  0 or 1
+        double            	data_time;      // time stamp : the final data sample in this block           need for gbt data
+        double            	coord_time;     // time stamp : ra/dec (ie, the time of Az/Za acquisition)    need for gbt data - 
+        double            	ra;             // ra for the beam from which the data in this block came     need for gbt data
+        double            	dec;            // dec for the beam from which the data in this block came    need for gbt data
+        long              	sky_freq;       // aka center frequency, Hz                                   need for gbt data
+        double            	samplerate;     //                                                            need for gbt data		
 	};
 
 	struct seti_data setiheader;
