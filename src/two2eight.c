@@ -129,11 +129,28 @@ int main(int argc, char *argv[]) {
 	
 	while(fread(buf, sizeof(char), 32768, fil)==32768) {		
 
-		 fseek(fil, -32768, SEEK_CUR);
+	    fseek(fil, -32768, SEEK_CUR);
+        if(vflag>=1) fprintf(stderr, "pos: %ld %d\n", ftell(fil),feof(fil));
 
-		 if(vflag>=1) fprintf(stderr, "length: %d\n", gethlength(buf));
+	    if(vflag>=1) fprintf(stderr, "length: %d\n", gethlength(buf));
 
-		 guppi_read_obs_params(buf, &gf, &pf);
+		guppi_read_obs_params(buf, &gf, &pf);
+        bitdepth = pf.hdr.nbits;
+
+        // At regular intervals, as a sanity check, the 2 bit
+        // data are preceeded by the full 8 bit version of
+        // the same data.  We skip the 8 bit data here.
+        if(bitdepth == 8){      
+            unsigned long skip_length;
+            fprintf(stderr, "caught an 8 bit header... moving on to first/next 2 bit header\n");
+            /* figure out the size of the first subint + header */
+            skip_length = pf.sub.bytes_per_subint + gethlength(buf);
+            /* seek past the first subint + header */
+            fseek(fil, skip_length, SEEK_CUR);
+		    if(vflag>=1) fprintf(stderr, "pos: %ld %d\n\n", ftell(fil),feof(fil));
+            filepos++;
+            continue;
+        }
 	 
 		 if(vflag>=1) fprintf(stderr, "size %d\n",pf.sub.bytes_per_subint + gethlength(buf));
 		 by = by + pf.sub.bytes_per_subint + gethlength(buf);
@@ -190,6 +207,7 @@ int main(int argc, char *argv[]) {
 								 //usleep(1000000);
 							 }
 						} else {						
+
 							fprintf(stderr, "This program only operates on 2bit data.\n");
 							exit(0);
 						 	//fitsval = ((float) (signed char) pf.sub.data[x]) ;
