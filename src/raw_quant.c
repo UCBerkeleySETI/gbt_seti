@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
 
 			 if(filepos == 0) {
 				/* beginning of file, compute statistics */
-				
+				if(vflag>=1) fprintf(stderr, "bytes: %ld pols: %d nchan: %d\n", pf.sub.bytes_per_subint, pf.hdr.rcvr_polns, pf.hdr.nchan);				
 			    mean = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 			    std = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 
@@ -156,8 +156,8 @@ int main(int argc, char *argv[]) {
 	
  				compute_stat(&pf, mean, std);
 
-//			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d mean %f\n", x,y,mean[(x*pf->hdr.rcvr_polns) + y]);
-//			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d std %f\n", x,y,std[(x*pf->hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d mean %f\n", x,y,mean[(x*pf.hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d std %f\n", x,y,std[(x*pf.hdr.rcvr_polns) + y]);
 
 
  			 }
@@ -352,21 +352,23 @@ int sample;
  /* we'll treat the real and imaginary parts identically - considering them as 2 samples/period) */
 
 /* This code is much slower than it needs to be, but it doesn't run very often */
+fprintf(stderr, "computing stats\n");
 
  for(x=0;x < pf->hdr.nchan; x = x + 1)   {
 		for(y=0;y<pf->hdr.rcvr_polns;y=y+1) {
 			 running_sum = 0;
 			 running_sum_sq = 0;
-			 
+			fprintf(stderr, "%d %d %d %ld\n", x, y, z, ((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan));
+
 			 for(z=0;z < pf->sub.bytes_per_subint/pf->hdr.nchan; z = z + (pf->hdr.rcvr_polns * 2)){
 				 //pol 0, real imag
 
 				 //real
-				 sample = (int) ((signed char) pf->sub.data[(x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2)]);
+				 sample = (int) ((signed char) pf->sub.data[((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2)]);
 				 running_sum = running_sum + (double) sample;
 
 				 //imag
-				 sample = (int) ((signed char) pf->sub.data[(x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2) + 1]);
+				 sample = (int) ((signed char) pf->sub.data[((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2) + 1]);
 				 running_sum = running_sum + (double) sample;
 
 			 }
@@ -377,11 +379,11 @@ int sample;
 					 //sample = (int) ((signed char) pf.sub.data[(x * pf.sub.bytes_per_subint/pf.hdr.nchan) + z]);
 
 					 //real
-					 sample = (int) ((signed char) pf->sub.data[(x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2)]);
+					 sample = (int) ((signed char) pf->sub.data[((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2)]);
 					 running_sum_sq = running_sum_sq + pow( ((double) sample - mean[(x*pf->hdr.rcvr_polns) + y]) , 2);
 
 					 //imag
-					 sample = (int) ((signed char) pf->sub.data[(x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2) + 1]);
+					 sample = (int) ((signed char) pf->sub.data[((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan) + z + (y * 2) + 1]);
 					 running_sum_sq = running_sum_sq + pow( ((double) sample - mean[(x*pf->hdr.rcvr_polns) + y]) , 2);
 
 			 }
