@@ -140,6 +140,9 @@ int main(int argc, char *argv[]) {
 			hputi4 (buf, "BLOCSIZE", pf.sub.bytes_per_subint);
 			hputi4 (buf,"NBITS",pf.hdr.nbits);
 			hputs (buf, "BACKEND", "GUPPI");
+			hputs (buf, "RA_STR", "03:04:33.0960");
+  			hputs (buf, "DEC_STR", "+19:32:51.7200");
+
 			fwrite(buf, sizeof(char), gethlength(buf), quantfil);  //write header
 
 			/* bytes_per_subint now updated to be the proper length */
