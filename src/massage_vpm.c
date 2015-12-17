@@ -142,6 +142,7 @@ int main(int argc, char *argv[]) {
 			hputs (buf, "BACKEND", "GUPPI");
 			hputs (buf, "RA_STR", "03:04:33.0960");
   			hputs (buf, "DEC_STR", "+19:32:51.7200");
+			hputs (buf, "FRONTEND", "Rcvr_800");
 
 			fwrite(buf, sizeof(char), gethlength(buf), quantfil);  //write header
 
