@@ -43,6 +43,11 @@ gpu:
 	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o $(BINDIR)/gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
 	$(CC) $(CFLAGS) -fno-strict-aliasing raw2wu.c -o $(BINDIR)/raw2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
 
+tags:
+	ctags -R .
+
+.PHONY: tags
+
 .SECONDEXPANSION:
 $(PROGS): $$@.c $(OBJS)
 	$(CC) $(CFLAGS) $< -o $(BINDIR)/$@ $(OBJS) $(LIBS) $(THREAD_LIBS)
