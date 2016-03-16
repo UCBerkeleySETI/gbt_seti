@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fil = NULL;   //input file
     FILE *quantfil = NULL;  //quantized file
     
-	int x,y,z;
+	long int x,y,z;
 	int a,b,c;
 
 	
@@ -345,7 +345,7 @@ int compute_stat(struct psrfits *pf, double *mean, double *std){
 
 double running_sum;
 double running_sum_sq;
-int x,y,z;
+long int x,y,z;
 int sample;
 	
  /* calulcate mean and rms for each channel-polarization */
