@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fil = NULL;   //input file
     FILE *quantfil = NULL;  //quantized file
     
-	long int x,y,z;
+	long int x=0,y=0,z=0;
 	int a,b,c;
 
 	
@@ -71,11 +71,11 @@ int main(int argc, char *argv[]) {
              vflag = 2;
              break; 
            case 'i':
-			 sprintf(pf.basefilename, optarg);
+			 sprintf(pf.basefilename, "%s", optarg);
 			 fil = fopen(pf.basefilename, "rb");
              break;
            case 'o':
-			 sprintf(quantfilename, optarg);
+			 sprintf(quantfilename, "%s", optarg);
 			 if(strcmp(quantfilename, "stdout")==0) {
 				 quantfil = stdout;
 			 } else {
@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
 
 			 if(filepos == 0) {
 				/* beginning of file, compute statistics */
-				if(vflag>=1) fprintf(stderr, "bytes: %ld pols: %d nchan: %d\n", pf.sub.bytes_per_subint, pf.hdr.rcvr_polns, pf.hdr.nchan);				
+				if(vflag>=1) fprintf(stderr, "bytes: %d pols: %d nchan: %d\n", pf.sub.bytes_per_subint, pf.hdr.rcvr_polns, pf.hdr.nchan);				
 			    mean = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 			    std = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 
@@ -156,8 +156,8 @@ int main(int argc, char *argv[]) {
 	
  				compute_stat(&pf, mean, std);
 
-			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d mean %f\n", x,y,mean[(x*pf.hdr.rcvr_polns) + y]);
-			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d std %f\n", x,y,std[(x*pf.hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %ld pol %ld mean %f\n", x,y,mean[(x*pf.hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %ld pol %ld std %f\n", x,y,std[(x*pf.hdr.rcvr_polns) + y]);
 
 
  			 }
@@ -358,7 +358,7 @@ fprintf(stderr, "computing stats\n");
 		for(y=0;y<pf->hdr.rcvr_polns;y=y+1) {
 			 running_sum = 0;
 			 running_sum_sq = 0;
-			fprintf(stderr, "%d %d %d %ld\n", x, y, z, ((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan));
+			fprintf(stderr, "%ld %ld %ld %ld\n", x, y, z, ((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan));
 
 			 for(z=0;z < pf->sub.bytes_per_subint/pf->hdr.nchan; z = z + (pf->hdr.rcvr_polns * 2)){
 				 //pol 0, real imag
