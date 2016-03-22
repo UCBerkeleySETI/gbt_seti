@@ -72,7 +72,12 @@ int main(int argc, char *argv[]) {
              break; 
            case 'i':
 			 sprintf(pf.basefilename, "%s", optarg);
-			 fil = fopen(pf.basefilename, "rb");
+             // If infile is "-" then use stdin
+             if(pf.basefilename[0] == '-' && pf.basefilename[1] == '\0') {
+                 fil = fdopen(0, "rb");
+             } else {
+                 fil = fopen(pf.basefilename, "rb");
+             }
              break;
            case 'o':
 			 sprintf(quantfilename, "%s", optarg);
@@ -119,9 +124,9 @@ int main(int argc, char *argv[]) {
 	
 	filepos=0;
 	
-	while(fread(buf, sizeof(char), 32768, fil)==32768) {		
+	while(!feof(fil)) {
 
-		 fseek(fil, -32768, SEEK_CUR);
+		 guppi_fread_header(buf, fil);
 
 		 if(vflag>=1) fprintf(stderr, "length: %d\n", gethlength(buf));
 
@@ -134,12 +139,8 @@ int main(int argc, char *argv[]) {
 		 if (pf.sub.data) free(pf.sub.data);
          pf.sub.data  = (unsigned char *)malloc(pf.sub.bytes_per_subint);
 		 
-		 fseek(fil, gethlength(buf), SEEK_CUR);
 		 rv=fread(pf.sub.data, sizeof(char), pf.sub.bytes_per_subint, fil);		 
-		 
 
-
-		
 		 if((long int)rv == pf.sub.bytes_per_subint){
 			 if(vflag>=1) fprintf(stderr, "%i\n", filepos);
 			 if(vflag>=1) fprintf(stderr, "pos: %ld %d\n", ftell(fil),feof(fil));

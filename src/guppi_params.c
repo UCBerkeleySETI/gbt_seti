@@ -221,6 +221,20 @@ void guppi_read_subint_params(char *buf,
 }
 
 
+// Read FITS header from file pointer f into memory pointer buf.
+// Should really take some sort of size limit for buf.
+// Should really return some sort of error condition.
+void guppi_fread_header(char *buf, FILE *f)
+{
+    while(fread(buf, sizeof(char), 80, f) == 80) {
+      if(!strncmp(buf, "END", 3)) {
+          break;
+      }
+      buf += 80;
+    }
+}
+
+
 // Read a status buffer all of the key observation paramters
 void guppi_read_obs_params(char *buf, 
                            struct guppi_params *g, 
