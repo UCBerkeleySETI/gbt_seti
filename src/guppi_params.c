@@ -226,11 +226,59 @@ void guppi_read_subint_params(char *buf,
 // Should really return some sort of error condition.
 void guppi_fread_header(char *buf, FILE *f)
 {
+    char pad_buf[512];
+    int directio = 0;
+    size_t size = 0;
+    int i;
+
     while(fread(buf, sizeof(char), 80, f) == 80) {
+      size += 80;
       if(!strncmp(buf, "END", 3)) {
           break;
       }
+      if(!strncmp(buf, "DIRECTIO=", 9)) {
+          // Stupid 1 detector
+          for(i=0; i<80; i++) {
+              if(buf[i] == '1') {
+                  // Change the '1' to a '0' since we will not output
+                  // using Direct I/O and set the local directio flag.
+                  buf[i] = '0';
+                  directio = 1;
+                  break;
+              }
+          }
+      }
       buf += 80;
+    }
+
+    // Skip padding if the file was written with Direct I/O.  The simple but
+    // incorrect expression for the padding size is:
+    //
+    //     512 - (size % 512)
+    //
+    // That is wrong because it skips 512 bytes if size is a multiple of 512.
+    // A more complex, but still incorrect, expression for the padding size
+    // is:
+    //
+    //     (512 - size) % 512
+    //
+    // But that is wrong because the % operator in C will return a negative
+    // number if the LHS is negative (i.e. if size is greater than 512).  To
+    // avoid that problem, we add a large multiple of 512, specifically
+    // `(1<<30)-512`, inside the parentheses to get this expression:
+    //
+    //     ((1<<30) - size) % 512
+    //
+    // That works because `(1<<30)-512` is a multiple of 512 so adding it to
+    // the LHS will not change the mathematical result of the mod 512 operation
+    // other than avoiding an equivalent (though unwanted) negative result
+    // (because `size` will never be anywhere near `(1<<30)`).
+    //
+    // We use `fread()` instead of `seek()` to get past the padding bytes so
+    // that this function can be used even when the input stream is
+    // non-seekable (e.g. when it is stdin).
+    if(directio) {
+      fread(pad_buf, sizeof(char), ((1<<30) - size) % 512, f);
     }
 }
 
