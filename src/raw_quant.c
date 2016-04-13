@@ -41,7 +41,7 @@ int main(int argc, char *argv[]) {
     FILE *fil = NULL;   //input file
     FILE *quantfil = NULL;  //quantized file
     
-	int x,y,z;
+	long int x=0,y=0,z=0;
 	int a,b,c;
 
 	
@@ -71,11 +71,16 @@ int main(int argc, char *argv[]) {
              vflag = 2;
              break; 
            case 'i':
-			 sprintf(pf.basefilename, optarg);
-			 fil = fopen(pf.basefilename, "rb");
+			 sprintf(pf.basefilename, "%s", optarg);
+             // If infile is "-" then use stdin
+             if(pf.basefilename[0] == '-' && pf.basefilename[1] == '\0') {
+                 fil = fdopen(0, "rb");
+             } else {
+                 fil = fopen(pf.basefilename, "rb");
+             }
              break;
            case 'o':
-			 sprintf(quantfilename, optarg);
+			 sprintf(quantfilename, "%s", optarg);
 			 if(strcmp(quantfilename, "stdout")==0) {
 				 quantfil = stdout;
 			 } else {
@@ -119,9 +124,9 @@ int main(int argc, char *argv[]) {
 	
 	filepos=0;
 	
-	while(fread(buf, sizeof(char), 32768, fil)==32768) {		
+	while(!feof(fil)) {
 
-		 fseek(fil, -32768, SEEK_CUR);
+		 guppi_fread_header(buf, fil);
 
 		 if(vflag>=1) fprintf(stderr, "length: %d\n", gethlength(buf));
 
@@ -134,12 +139,8 @@ int main(int argc, char *argv[]) {
 		 if (pf.sub.data) free(pf.sub.data);
          pf.sub.data  = (unsigned char *)malloc(pf.sub.bytes_per_subint);
 		 
-		 fseek(fil, gethlength(buf), SEEK_CUR);
 		 rv=fread(pf.sub.data, sizeof(char), pf.sub.bytes_per_subint, fil);		 
-		 
 
-
-		
 		 if((long int)rv == pf.sub.bytes_per_subint){
 			 if(vflag>=1) fprintf(stderr, "%i\n", filepos);
 			 if(vflag>=1) fprintf(stderr, "pos: %ld %d\n", ftell(fil),feof(fil));
@@ -147,7 +148,7 @@ int main(int argc, char *argv[]) {
 
 			 if(filepos == 0) {
 				/* beginning of file, compute statistics */
-				if(vflag>=1) fprintf(stderr, "bytes: %ld pols: %d nchan: %d\n", pf.sub.bytes_per_subint, pf.hdr.rcvr_polns, pf.hdr.nchan);				
+				if(vflag>=1) fprintf(stderr, "bytes: %d pols: %d nchan: %d\n", pf.sub.bytes_per_subint, pf.hdr.rcvr_polns, pf.hdr.nchan);				
 			    mean = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 			    std = malloc(pf.hdr.rcvr_polns *  pf.hdr.nchan * sizeof(double));
 
@@ -156,8 +157,8 @@ int main(int argc, char *argv[]) {
 	
  				compute_stat(&pf, mean, std);
 
-			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d mean %f\n", x,y,mean[(x*pf.hdr.rcvr_polns) + y]);
-			 if(vflag>=1) fprintf(stderr, "chan  %d pol %d std %f\n", x,y,std[(x*pf.hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %ld pol %ld mean %f\n", x,y,mean[(x*pf.hdr.rcvr_polns) + y]);
+			 if(vflag>=1) fprintf(stderr, "chan  %ld pol %ld std %f\n", x,y,std[(x*pf.hdr.rcvr_polns) + y]);
 
 
  			 }
@@ -345,7 +346,7 @@ int compute_stat(struct psrfits *pf, double *mean, double *std){
 
 double running_sum;
 double running_sum_sq;
-int x,y,z;
+long int x,y,z;
 int sample;
 	
  /* calulcate mean and rms for each channel-polarization */
@@ -358,7 +359,7 @@ fprintf(stderr, "computing stats\n");
 		for(y=0;y<pf->hdr.rcvr_polns;y=y+1) {
 			 running_sum = 0;
 			 running_sum_sq = 0;
-			fprintf(stderr, "%d %d %d %ld\n", x, y, z, ((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan));
+			fprintf(stderr, "%ld %ld %ld %ld\n", x, y, z, ((long int) x * pf->sub.bytes_per_subint/pf->hdr.nchan));
 
 			 for(z=0;z < pf->sub.bytes_per_subint/pf->hdr.nchan; z = z + (pf->hdr.rcvr_polns * 2)){
 				 //pol 0, real imag
@@ -414,4 +415,4 @@ void bin_print_verbose(unsigned char x)
 }
 
 
-
+/* vi: set ts=4 et : */

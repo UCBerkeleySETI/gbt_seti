@@ -7,6 +7,8 @@
 #ifndef _GUPPI_PARAMS_H
 #define _GUPPI_PARAMS_H
 
+#include <stdio.h>
+
 struct guppi_params {
     /* Packet information for the current block */
     long long packetindex;      // Index of first packet in raw data block
@@ -32,6 +34,7 @@ void guppi_read_net_params(char *buf, struct guppi_udp_params *u);
 void guppi_read_subint_params(char *buf, 
                               struct guppi_params *g, 
                               struct psrfits *p);
+void guppi_fread_header(char *buf, FILE *f);
 void guppi_read_obs_params(char *buf, 
                            struct guppi_params *g, 
                            struct psrfits *p);
