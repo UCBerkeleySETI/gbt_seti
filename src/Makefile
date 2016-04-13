@@ -27,7 +27,7 @@ OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
-LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart
+LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib
 
 SLAOBJS = slalib/addet.o slalib/afin.o slalib/airmas.o slalib/altaz.o                \
 	slalib/amp.o slalib/ampqk.o slalib/aop.o slalib/aoppa.o slalib/aoppat.o      \
@@ -93,10 +93,10 @@ guppi2spectra_gpu.o: guppi2spectra_gpu.cu
 	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o
 
 gpuspec: guppi2spectra.c guppi2spectra_gpu.o $(SLALIB)
-	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) $(SLALIB)
+	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
 
 raw2wu: raw2wu.c guppi2spectra_gpu.o $(SLALIB)
-	$(CC) $(CFLAGS) -fno-strict-aliasing raw2wu.c -o raw2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) $(SLALIB)
+	$(CC) $(CFLAGS) -fno-strict-aliasing raw2wu.c -o raw2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
 
 slalib: $(SLALIB)
 
@@ -129,5 +129,5 @@ clean:
 
 .SECONDEXPANSION:
 $(PROGS): $$@.c $(OBJS) $(SLALIB)
-	$(CC) $(CFLAGS) $< -o $@ $(OBJS) $(LIBS) $(SLALIB) $(THREAD_LIBS)
+	$(CC) $(CFLAGS) $< -o $@ $(OBJS) $(LIBS) -lsla $(THREAD_LIBS)
 
