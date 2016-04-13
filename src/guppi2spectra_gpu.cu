@@ -43,7 +43,7 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 
 	 if(tid < veclen) {
 		  //spectrumd[tid] = ((voltages[((tid+fftlen/2)%fftlen)].x * voltages[((tid+fftlen/2)%fftlen)].x) + (voltages[((tid+fftlen/2)%fftlen)].y * voltages[((tid+fftlen/2)%fftlen)].y) + (voltages[fftlen + ((tid+fftlen/2)%fftlen)].x * voltages[fftlen + ((tid+fftlen/2)%fftlen)].x)+ (voltages[fftlen + ((tid+fftlen/2)%fftlen)].y * voltages[fftlen + ((tid+fftlen/2)%fftlen)].y))/bandpassd[tid];	 		  
-		  spectrumd[tid] = ((voltages[indx].x * voltages[indx].x) + (voltages[indx].y * voltages[indx].y) + (voltages[veclen + indx].x * voltages[veclen + indx].x)+ (voltages[veclen + indx].y * voltages[veclen + indx].y));	 		  
+		  spectrumd[tid] = spectrumd[tid] + ((voltages[indx].x * voltages[indx].x) + (voltages[indx].y * voltages[indx].y) + (voltages[veclen + indx].x * voltages[veclen + indx].x)+ (voltages[veclen + indx].y * voltages[veclen + indx].y));	 		  
 	 }
 }
 

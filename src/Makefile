@@ -2,7 +2,7 @@ OPT64 = /opt/vegas
 FC = gfortran
 FFLAGS = -g -fPIC
 OS = Linux
-BINDIR = $(SETI_GBT)/bin
+BINDIR = ./
 CUDA = /usr/local/cuda
 CUDAC = $(CUDA)/bin/nvcc
 # Linux is the first choice
@@ -27,7 +27,7 @@ LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfit
 all: slalib $(PROGS) gpu
 clean:
 	rm -f $(PROGS) *~ *.o 
-INSTALL_DIR = ../bin
+INSTALL_DIR = $(SETI_GBT)/bin
 install: $(PROGS)
 	mkdir -p $(INSTALL_DIR) && \
 	cp -f $(PROGS) $(INSTALL_DIR)
