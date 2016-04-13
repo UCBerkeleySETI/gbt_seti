@@ -4,8 +4,9 @@ FFLAGS = -g -fPIC
 OS = Linux
 # Default to installing in /usr/local/listen
 SETI_GBT ?= /usr/local/listen
-BINDIR = $(SETI_GBT)/bin
-LIBDIR = $(SETI_GBT)/lib
+prefix ?= $(SETI_GBT)
+BINDIR = $(prefix)/bin
+LIBDIR = $(prefix)/lib
 CUDA = /usr/local/cuda
 CUDAC = $(CUDA)/bin/nvcc
 # Linux is the first choice
@@ -131,3 +132,4 @@ clean:
 $(PROGS): $$@.c $(OBJS) $(SLALIB)
 	$(CC) $(CFLAGS) $< -o $@ $(OBJS) $(LIBS) -lsla $(THREAD_LIBS)
 
+# vi: set ts=8 :
