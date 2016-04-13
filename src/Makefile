@@ -2,8 +2,8 @@ OPT64 = /opt/vegas
 FC = gfortran
 FFLAGS = -g -fPIC
 OS = Linux
-# Default to installing in-tree
-SETI_GBT ?= ..
+# Default to installing in /usr/local/listen
+SETI_GBT ?= /usr/local/listen
 BINDIR = $(SETI_GBT)/bin
 LIBDIR = $(SETI_GBT)/lib
 CUDA = /usr/local/cuda
