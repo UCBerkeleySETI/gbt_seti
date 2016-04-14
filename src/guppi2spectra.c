@@ -1142,10 +1142,11 @@ unsigned long int fftlen;
 					   for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
 						   offseta = n * fftlen;
 						   for (j = 0; j < nchannels; j = j + 1) {						
-							memcpy(accumspectra, gpu_spec[i].spectrum + ( offseta + (pointsperchannel * j) ), sizeof(float) * fftlen);
+							memcpy(accumspectra + (j * fftlen) , gpu_spec[i].spectrum + ( offseta + (pointsperchannel * j) ), sizeof(float) * fftlen);
 							//fwrite(gpu_spec[i].spectrum + (offseta + (pointsperchannel * j) ), sizeof(float), fftlen, gpu_spec[i].filterbank_file);		
 							}
 					   		fwrite(accumspectra, sizeof(float), fftlen * nchannels, gpu_spec[i].filterbank_file);
+						
 					   }			
 					   free(accumspectra);
 					  /* DUMP TO FILE */																 
