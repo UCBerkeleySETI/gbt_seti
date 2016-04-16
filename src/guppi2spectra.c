@@ -776,7 +776,16 @@ if(firsttime) {
 								   pthread_join(accumwrite_th0, NULL);
 								}	 
 */								 
-								 
+
+						  for (i=0;i<gpu_spec[0].nspec;i++)	{
+							  if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
+								  memcpy(gpu_spec[i].spectrum, gpu_spec[i].spectra, nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN * sizeof(float));																						  
+								  gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
+								  gpu_spec[i].spectracnt = 0;
+							  }
+						  }
+
+/*								 
 								for (i=0;i<gpu_spec[0].nspec;i++)	{
 									 if (gpu_spec[i].spectraperchannel >= gpu_spec[i].integrationtime) {								 									 
 
@@ -794,7 +803,7 @@ if(firsttime) {
 										gpu_spec[i].spectracnt = 0;
 									}
 								}
-
+*/
 								 
 								 pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write, (void *) &gpu_spec);
 /*
@@ -1284,13 +1293,15 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 			HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
 
-			HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
+			(if gpu_spec[i].spectracnt == 0) HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
 			detect_wrapper(gpu_spec[i].b_d, chanbytes * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			gpu_spec[i].spectracnt++; 
 	   
 			cudaThreadSynchronize();
-			HANDLE_ERROR( cudaMemcpy(gpu_spec[i].spectra, gpu_spec[i].spectrumd, chanbytes * nchannels * sizeof(float), cudaMemcpyDeviceToHost) );
+			if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
+				HANDLE_ERROR( cudaMemcpy(gpu_spec[i].spectra, gpu_spec[i].spectrumd, chanbytes * nchannels * sizeof(float), cudaMemcpyDeviceToHost) );
+			}
 			fprintf(stderr, "\n\n%f %f\n\n", gpu_spec[i].spectra[100], gpu_spec[i].spectra[1]);
-			gpu_spec[i].spectracnt++; 
 	}
 
 /*
