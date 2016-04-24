@@ -15,6 +15,7 @@
 #include "cuda_runtime_api.h"
 #include <pthread.h>
 #include "filterbank.h"
+#include "fcntl.h"
 
 static void HandleError( cudaError_t err,
                          const char *file,
@@ -66,6 +67,9 @@ extern void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, floa
 extern void setQuant(float *lut);
 extern void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
 extern void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
+extern void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+extern void explode8init_wrapper(char *channelbufferd, int length);
+extern void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
 
 /* gpu spectrometer structure */
 /* one of these for each cufft plan that will operate on a block of raw voltage data */
@@ -75,7 +79,6 @@ struct gpu_spectrometer {
 	 unsigned char *channelbuffer;
 	 long int spectracnt;
 	 long int triggerwrite;
-	 char *scratchpath;
 	 cufftComplex *a_d; 
 	 cufftComplex *b_d; 
 	 cufftHandle plan; 
@@ -86,6 +89,7 @@ struct gpu_spectrometer {
 	 int kurtosis;
 	 int nBytes;
 	 unsigned char *channelbufferd;
+	 char *channelbufferd8;
 	 float * spectrumd;
 	 float * spectra;
 	 float * spectrum;
@@ -108,7 +112,7 @@ void print_usage(char *argv[]);
 
 //int channelize(struct diskinput *diskfiles);
 
-void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, long long int chanbytes);
+void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, long long int nsamples);
 
 void accumulate_write(void *ptr);
 
@@ -146,7 +150,6 @@ int vflag=0; //verbose
 int main(int argc, char *argv[]) {
 
 
-	int filecnt=0;
     char buf[32768];
 	char tempbuf[16];
 	char tempbufl[256];
@@ -175,19 +178,17 @@ int main(int argc, char *argv[]) {
 	long long int curindx;
 	long long int chanbytes=0;
 	long long int chanbytes_overlap = 0;
-	long long int subint_offset = 0;
 	long long int nsamples = 0;
+	long int hlength=0;
 	double hack = 0;
-	long int nframes = 0;
 	long int nchannels = 0;
-	
+	int inbits = 0;
 	int indxstep = 0;
 	int channel = -1;
-
+    
 
 	int firsttime=0;
 
-	FILE *outputfile = NULL;
     
 	size_t rv=0;
 	long unsigned int by=0;
@@ -197,7 +198,6 @@ int main(int argc, char *argv[]) {
 	long int i,j,k,m,n;
     
     char *partfilename=NULL;
-    char *scratchpath=NULL;
 
 
     
@@ -206,7 +206,7 @@ int main(int argc, char *argv[]) {
 	rawinput.invalid = 0;
 	rawinput.first_file_skip = 0;
 
-	
+	int filehandle = -1;
 	
 	char *pntr;
 
@@ -230,7 +230,7 @@ int main(int argc, char *argv[]) {
 long int num_bufs=1;
        opterr = 0;
      
-       while ((c = getopt (argc, argv, "Vvhdi:o:c:f:t:k:s:p:g:B:")) != -1)
+       while ((c = getopt (argc, argv, "Vvdi:o:c:h:f:t:k:b:p:g:B:")) != -1)
          switch (c)
            {
            case 'v':
@@ -244,7 +244,7 @@ long int num_bufs=1;
               pntr = strtok (optarg,",");
 			  while (pntr != NULL) {
 				  if(i>3){fprintf(stderr, "Error! Up to four FFT lengths supported.\n"); exit(1);}
-				  gpu_spec[i].cufftN=atoll(pntr);
+				  gpu_spec[i].cufftN=atol(pntr);
 				  pntr = strtok (NULL, ",");
 			  	  i++;
 			  }
@@ -255,7 +255,7 @@ long int num_bufs=1;
               pntr = strtok (optarg,",");
 			  while (pntr != NULL) {
 				  if(i>3){fprintf(stderr, "Error! Up to four integration lengths supported.\n"); exit(1);}
-				  gpu_spec[i].integrationtime=atoll(pntr);
+				  gpu_spec[i].integrationtime=atol(pntr);
 				  pntr = strtok (NULL, ",");
 			  	  i++;
 			  }
@@ -266,13 +266,13 @@ long int num_bufs=1;
               pntr = strtok (optarg,",");
 			  while (pntr != NULL) {
 				  if(i>3){fprintf(stderr, "Error! Up to four kurtosis instances supported.\n"); exit(1);}
-				  gpu_spec[i].kurtosis=atoll(pntr);
+				  gpu_spec[i].kurtosis=atoi(pntr);
 				  pntr = strtok (NULL, ",");
 			  	  i++;
 			  }
              break;              
-           case 's':
-             scratchpath = optarg;
+           case 'b':
+             inbits = atoi(optarg);
              break;
            case 'g':
            	 for(i=0;i<4;i++){ gpu_spec[i].gpudevice = atoi(optarg); }
@@ -281,7 +281,8 @@ long int num_bufs=1;
              vflag = 2;
              break; 
            case 'h':
-             hack = 1500.0/1024.0;
+             hack = strtod(optarg, NULL);
+             //1500.0/1024.0;
              fprintf (stderr, "Setting hacked frequency offset to: %f \n", hack);
              break; 
            case 'i':
@@ -318,6 +319,8 @@ if (integrationcnt != fftcnt) {fprintf(stderr, "Must specify same number of inte
 /* set number of spectrometer instances */
 gpu_spec[0].nspec = fftcnt;
 
+if (inbits == 0) {fprintf(stderr, "Warning: input bitwidth not set, defaulting to 2\n"); inbits = 2;}
+
 
 
 if(strstr(rawinput.file_prefix, ".0000.raw") != NULL) memset(rawinput.file_prefix + strlen(rawinput.file_prefix) - 9, 0x0, 9);
@@ -337,17 +340,8 @@ HANDLE_ERROR ( cudaThreadSynchronize() );
 
 
 
-/* load lookup table into GPU memory */
 
-float lookup[4];
- lookup[0] = 3.3358750;
- lookup[1] = 1.0;
- lookup[2] = -1.0;
- lookup[3] = -3.3358750;
 
-setQuant(lookup);
-
-HANDLE_ERROR ( cudaThreadSynchronize() );
 /* --------------------------------- */
 
 
@@ -393,9 +387,9 @@ if(rawinput.fil){
 		   
 		   guppi_read_obs_params(buf, &rawinput.gf, &rawinput.pf);
 		   
-		   if(rawinput.pf.hdr.nbits == 8) {
-			  
-			  fprintf(stderr, "caught an an 8 bit header\n");
+		   if(rawinput.pf.hdr.nbits == 8 && inbits == 2) {
+			  /* note this should never be the case for directio = 1 data... */
+			  fprintf(stderr, "Found an 8 bit header for 2 bit data, skipping...\n");
 			  
 			  /* figure out the size of the first subint + header */
 		      rawinput.first_file_skip = rawinput.pf.sub.bytes_per_subint + gethlength(buf);
@@ -421,6 +415,7 @@ if(rawinput.fil){
 		   rawinput.fil = NULL;
 
 		   hgeti4(buf, "OVERLAP", &rawinput.overlap);
+		   fprintf(stderr, "DIRECTIO: %d\n\n",rawinput.pf.hdr.directio);
 
   		   fprintf(stderr, "overlap %d\n", rawinput.overlap);
 		   fprintf(stderr, "packetindex %lld\n", rawinput.gf.packetindex);
@@ -431,6 +426,7 @@ if(rawinput.fil){
 		   fprintf(stderr, "bytes_per_subint: %d\n\n",rawinput.pf.sub.bytes_per_subint);
 		   fprintf(stderr, "nchan: %d\n\n",rawinput.pf.hdr.nchan);
 		   fprintf(stderr, "npol: %d\n\n",rawinput.pf.hdr.npol);
+
 
 		   if (rawinput.pf.sub.data) free(rawinput.pf.sub.data);
 		   
@@ -460,6 +456,7 @@ fprintf(stderr, "outputing detected spectra to %s\n", partfilename);
 fprintf(stderr, "Total Memory Footprint on GPU (2bit): %f MB \n", (double) rawinput.pf.sub.bytes_per_subint * num_bufs / 1048576.0);
 fprintf(stderr, "Total Memory Footprint on GPU (32 bit float): %f MB \n", (double) rawinput.pf.sub.bytes_per_subint * num_bufs * 16 / 1048576.0);
 fprintf(stderr, "Available samples per channel %f\n", (double) rawinput.pf.sub.bytes_per_subint * num_bufs / rawinput.pf.hdr.nchan);
+fprintf(stderr, "nbits: %d\n\n",rawinput.pf.hdr.nbits);
 
 
 
@@ -480,10 +477,10 @@ firstinput = rawinput;
 	
 
 
-printf("calculating index step\n");
+if(vflag>1) fprintf(stderr, "calculating index step\n");
 
 /* number of packets that we *should* increment by */
-indxstep = (int) ((rawinput.pf.sub.bytes_per_subint * 4) / rawinput.gf.packetsize) - (int) (rawinput.overlap * rawinput.pf.hdr.nchan * rawinput.pf.hdr.rcvr_polns * 2 / rawinput.gf.packetsize);
+indxstep = (int) ((rawinput.pf.sub.bytes_per_subint * (8/rawinput.pf.hdr.nbits)) / rawinput.gf.packetsize) - (int) (rawinput.overlap * rawinput.pf.hdr.nchan * rawinput.pf.hdr.rcvr_polns * 2 / rawinput.gf.packetsize);
 
 
 nchannels = rawinput.pf.hdr.nchan;
@@ -497,36 +494,40 @@ overlap = rawinput.overlap;
 /* divide by 4 to get back to 2 bits */
 
 
-chanbytes = (indxstep * rawinput.gf.packetsize / (4 * rawinput.pf.hdr.nchan)) * num_bufs; 
-printf("number of non-overlapping bytes for each chan %lld\n", chanbytes);
+chanbytes = (indxstep * rawinput.gf.packetsize / ((8/rawinput.pf.hdr.nbits) * rawinput.pf.hdr.nchan)) * num_bufs; 
+if(vflag>1) fprintf(stderr, "number of non-overlapping bytes for each chan %lld\n", chanbytes);
+
+/* for 2 bit data, the number of dual pol samples is the same as the number of bytes */
+
+nsamples = chanbytes / 4 * (8/rawinput.pf.hdr.nbits);
 
 for(i=0;i<gpu_spec[0].nspec;i++){
-   if((chanbytes)%gpu_spec[i].cufftN != 0) {
-   fprintf(stderr, "samples per channel %lld is not evenly divisible by fftlen %ld!\n", chanbytes, gpu_spec[i].cufftN);
+   if((nsamples)%gpu_spec[i].cufftN != 0) {
+   fprintf(stderr, "samples per channel %lld is not evenly divisible by fftlen %ld!\n", nsamples, gpu_spec[i].cufftN);
    exit(1);
    }
 }
 
 
 channelbuffer  = (unsigned char *) calloc(chanbytes * nchannels, sizeof(unsigned char) );
-printf("malloc'ing %Ld Mbytes for processing all channels/all pols\n",  chanbytes * nchannels);	
+if(vflag>0)printf("malloc'ing %Ld Mbytes for processing all channels/all pols\n",  chanbytes * nchannels);	
 
 long int chanbytes_subint;
 long int chanbytes_subint_total;
-chanbytes_subint = (indxstep * rawinput.gf.packetsize / (4 * rawinput.pf.hdr.nchan));
+chanbytes_subint = (indxstep * rawinput.gf.packetsize / ((8/rawinput.pf.hdr.nbits) * rawinput.pf.hdr.nchan));
 chanbytes_subint_total = rawinput.pf.sub.bytes_per_subint / rawinput.pf.hdr.nchan;
+
 
 /* total number of bytes per channel, including overlap */
 chanbytes_overlap = rawinput.pf.sub.bytes_per_subint / rawinput.pf.hdr.nchan;
-printf("total number of bytes per channel, including overlap %lld\n", chanbytes_overlap);
+if(vflag>0)fprintf(stderr, "total number of bytes per channel, including overlap %lld\n", chanbytes_overlap);
 
 
-printf("Index step: %d\n", indxstep);
-printf("bytes per subint %d\n",rawinput.pf.sub.bytes_per_subint );
+if(vflag>0)fprintf(stderr, "Index step: %d\n", indxstep);
+if(vflag>0)fprintf(stderr, "bytes per subint %d\n",rawinput.pf.sub.bytes_per_subint );
 
-/* for 2 bit data, the number of dual pol samples is the same as the number of bytes */
-/* so we set the number of samples per channel to the number of bytes per channel */
-nsamples = chanbytes;
+
+
 
 
 fflush(stdout);
@@ -536,8 +537,6 @@ firsttime=1;
 startindx = rawinput.gf.packetindex;
 curindx = startindx;
 
-filecnt = rawinput.filecnt;
-
 rawinput.curfile = 0;			
 long int subint_cnt = 0;
 
@@ -545,391 +544,352 @@ do{
 										
 	if(!rawinput.invalid){						  
 		  if(rawinput.fil == NULL) {
+//		  if(filehandle < 0) {
+
 			  /* no file is open for this band, try to open one */
 			  sprintf(filname, "%s.%04d.raw",rawinput.file_prefix,rawinput.curfile);
 			  printf("filename is %s\n",filname);
 			  if(exists(filname)){
 				 printf("opening %s\n",filname);				
 				 rawinput.fil = fopen(filname, "rb");			 
+				 //filehandle = open(filname, O_RDONLY);
 				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) fseek(rawinput.fil, rawinput.first_file_skip, SEEK_CUR);  
+//				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) lseek(filehandle, rawinput.first_file_skip, SEEK_CUR);  
+
 			  }	else {
 			  	rawinput.invalid = 1;
 		  	  	printf("couldn't open any more files!\n");
-		  	  	//exit(1);
 		  	  }
 		  }
 
 	if(rawinput.fil){
-				if(fread(buf, sizeof(char), 32768, rawinput.fil) == 32768) {
+//	if(filehandle > 0){
+
+		if(fread(buf, sizeof(char), 32768, rawinput.fil) == 32768) {
+//		if(read(filehandle, buf, 32768) == 32768) {
 				
-					fseek(rawinput.fil, -32768, SEEK_CUR);
-					if(vflag>=1) fprintf(stderr, "header length: %d\n", gethlength(buf));
-					guppi_read_obs_params(buf, &rawinput.gf, &rawinput.pf);
+			fseek(rawinput.fil, -32768, SEEK_CUR);
+//			lseek(filehandle, -32768, SEEK_CUR);
 
-fflush(stdout);
-fflush(stderr);
-
-
-if(firsttime) {
-
-
-	 /* First setup all the gpu stuff... */
-	 size_t totalsize, worksize;
-	 /* Handle everything that's uniform between spectrometer instances */
-
-	HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
-	if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
-	
-
-    HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  nsamples * nchannels) );  	
-	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].a_d), sizeof(cufftComplex)*(chanbytes * nchannels * 2)) ); 
-
-	for(i=1;i<gpu_spec[0].nspec;i++){
-		gpu_spec[i].channelbufferd = gpu_spec[0].channelbufferd;
-		gpu_spec[i].a_d = gpu_spec[0].a_d;
-	}
-
-	for(i=0;i<gpu_spec[0].nspec;i++){
-		gpu_spec[i].nBytes = sizeof(cufftComplex)*(chanbytes * nchannels * 2); 
-		gpu_spec[i].cufftbatchSize = (nsamples * nchannels * 2)/gpu_spec[i].cufftN;
-		gpu_spec[i].spectraperchannel = (long int) (nsamples)/gpu_spec[i].cufftN;
-
-        if( gpu_spec[i].spectraperchannel > gpu_spec[i].integrationtime) {
-        	if (gpu_spec[i].spectraperchannel%gpu_spec[i].integrationtime != 0) {
-				fprintf(stderr,"%ld not evenly divisible by %ld!\n", gpu_spec[i].spectraperchannel, gpu_spec[i].integrationtime);        		
-        		exit(1);
-        	}
-        } else if( gpu_spec[i].spectraperchannel < gpu_spec[i].integrationtime) {
-        	if (gpu_spec[i].integrationtime%gpu_spec[i].spectraperchannel != 0) {
-				fprintf(stderr,"%ld not evenly divisible by %ld!\n", gpu_spec[i].integrationtime, gpu_spec[i].spectraperchannel);        		
-        		exit(1);
-        	}
-		}
-
-        
-
-		gpu_spec[i].bandpass = (float *) malloc (gpu_spec[i].cufftN * sizeof(float));
-		gpu_spec[i].spectra = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
-		gpu_spec[i].spectrum = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
-	    if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
-	    if(vflag>=1) fprintf(stderr,"Spectra per channel for this mode: %ld\n", gpu_spec[i].spectraperchannel);        		
-
-        HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
-	    HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
-        fprintf(stderr, "madeit\n");
-
-	    if(vflag>=1) fprintf(stderr,"Estimated Size of Work Space: %ld\n", (long int) (((double) worksize) /  1048576.0) );
-		HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].bandpassd), gpu_spec[i].cufftN * sizeof(float)) );
-		HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].spectrumd), gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
-		HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].b_d), sizeof(cufftComplex)*(chanbytes * nchannels * 2)) ); 
-   	    HANDLE_ERROR( cudaMemcpy(gpu_spec[i].bandpassd, gpu_spec[i].bandpass, gpu_spec[i].cufftN * sizeof(float), cudaMemcpyHostToDevice) ); 
-
-		gpu_spec[i].channelbuffer = channelbuffer;
-		gpu_spec[i].spectracnt = 0;
-		gpu_spec[i].triggerwrite = 0;
-		gpu_spec[i].scratchpath = scratchpath;
-		gpu_spec[i].rawinput = &rawinput;
-	    for(j=0;j<(nchannels * gpu_spec[i].cufftN);j++) gpu_spec[i].spectrum[j] = 0;
-		for(j=0;j<gpu_spec[i].cufftN;j++)  gpu_spec[i].bandpass[j] = 1;
-	}
-
-
-	  // we'll need to set this to npols * nsamples * nchannels / fftsize   
-		
-	cudaThreadSynchronize();
-
-	HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
-	if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
-	
-    /* Now let's do the filterbank headers... */
- 
-	machine_id=20;
-	telescope_id=6;
-	data_type=1;
-	nbeams = 1;
-	ibeam = 1;
-	nbits=32;
-	obits=32;
-	nifs = 1;
-	src_raj=0.0;
-	src_dej=0.0;
-	az_start=0.0;
-	za_start=0.0;
-    strcpy(ifstream,"YYYY");
-    tstart = rawinput.pf.hdr.MJD_epoch;
+			if(vflag>1) fprintf(stderr, "header length: %d\n", gethlength(buf));
+			
+			guppi_read_obs_params(buf, &rawinput.gf, &rawinput.pf);
 
 
 
-    sprintf(source_name, "%s", rawinput.pf.hdr.source);
-    sprintf(inpfile, "%s", filname);
-	memset(tempbufl, 0x0, 256);
-	strcat(tempbufl, strtok(rawinput.pf.hdr.ra_str, ":"));
-	
-	strcat(tempbufl, strtok((char *) 0, ":"));
-	strcat(tempbufl, strtok((char *) 0, ":"));
-	src_raj = strtod(tempbufl, (char **) NULL);
-	
-	const char *padding = "000000000";
-    int padLen;
-	memset(tempbufl, 0x0, 256);
-	strcat(tempbufl, strtok(rawinput.pf.hdr.dec_str, ":"));
-	strcat(tempbufl, strtok((char *) 0, ":"));
+			if(firsttime) {
+
+				 /* First setup all the gpu stuff... */
+				 size_t totalsize, worksize;
+				 /* Handle everything that's uniform between spectrometer instances */
+
+				HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
+				if(vflag>0) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
+   
+
+				HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].a_d), sizeof(cufftComplex)*(nsamples * nchannels * 2)) ); 
+
+
+				/* load lookup table into GPU memory */
+
+				if (rawinput.pf.hdr.nbits == 2) {
+					float lookup[4];
+					 lookup[0] = 3.3358750;
+					 lookup[1] = 1.0;
+					 lookup[2] = -1.0;
+					 lookup[3] = -3.3358750;
+					setQuant(lookup);
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  chanbytes * nchannels) );  	
+
+				} else if (rawinput.pf.hdr.nbits == 8) {
+					if(vflag>0) fprintf(stderr,"Initializing for 8 bits...\n");
+
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd8),  chanbytes * nchannels) );  	
+					//explode8init_wrapper(gpu_spec[0].channelbufferd8, chanbytes * nchannels);
+				}
+
+				HANDLE_ERROR ( cudaThreadSynchronize() );
+
+				for(i=1;i<gpu_spec[0].nspec;i++){
+					gpu_spec[i].channelbufferd = gpu_spec[0].channelbufferd;
+					gpu_spec[i].channelbufferd8 = gpu_spec[0].channelbufferd8;
+					gpu_spec[i].a_d = gpu_spec[0].a_d;
+				}
+
+				for(i=0;i<gpu_spec[0].nspec;i++){
+					gpu_spec[i].nBytes = sizeof(cufftComplex)*(nsamples * nchannels * 2); 
+					gpu_spec[i].cufftbatchSize = (nsamples * nchannels * 2)/gpu_spec[i].cufftN;
+					gpu_spec[i].spectraperchannel = (long int) (nsamples)/gpu_spec[i].cufftN;
+
+					if( gpu_spec[i].spectraperchannel > gpu_spec[i].integrationtime) {
+						if (gpu_spec[i].spectraperchannel%gpu_spec[i].integrationtime != 0) {
+							fprintf(stderr,"%ld not evenly divisible by %ld!\n", gpu_spec[i].spectraperchannel, gpu_spec[i].integrationtime);        		
+							exit(1);
+						}
+					} else if( gpu_spec[i].spectraperchannel < gpu_spec[i].integrationtime) {
+						if (gpu_spec[i].integrationtime%gpu_spec[i].spectraperchannel != 0) {
+							fprintf(stderr,"%ld not evenly divisible by %ld!\n", gpu_spec[i].integrationtime, gpu_spec[i].spectraperchannel);        		
+							exit(1);
+						}
+					}        
+
+					gpu_spec[i].bandpass = (float *) malloc (gpu_spec[i].cufftN * sizeof(float));
+					gpu_spec[i].spectra = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
+					gpu_spec[i].spectrum = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
+					if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
+					if(vflag>=1) fprintf(stderr,"Spectra per channel for this mode: %ld\n", gpu_spec[i].spectraperchannel);        		
+				    if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
+
+					HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
+					HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
+
+					if(vflag>=1) fprintf(stderr,"Estimated Size of Work Space: %ld\n", (long int) (((double) worksize) /  1048576.0) );
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].bandpassd), gpu_spec[i].cufftN * sizeof(float)) );
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].spectrumd), gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].b_d), sizeof(cufftComplex)*(nsamples * nchannels * 2)) ); 
+					HANDLE_ERROR( cudaMemcpy(gpu_spec[i].bandpassd, gpu_spec[i].bandpass, gpu_spec[i].cufftN * sizeof(float), cudaMemcpyHostToDevice) ); 
+
+					gpu_spec[i].channelbuffer = channelbuffer;
+					gpu_spec[i].spectracnt = 0;
+					gpu_spec[i].triggerwrite = 0;
+					gpu_spec[i].rawinput = &rawinput;
+					for(j=0;j<(nchannels * gpu_spec[i].cufftN);j++) gpu_spec[i].spectrum[j] = 0;
+					for(j=0;j<gpu_spec[i].cufftN;j++)  gpu_spec[i].bandpass[j] = 1;
+				}
+	   
+				cudaThreadSynchronize();
+
+				HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
+				if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
+   
+				/* Now let's do the filterbank headers... */
+
+				machine_id=20;
+				telescope_id=6;
+				data_type=1;
+				nbeams = 1;
+				ibeam = 1;
+				nbits=32;
+				obits=32;
+				nifs = 1;
+				src_raj=0.0;
+				src_dej=0.0;
+				az_start=0.0;
+				za_start=0.0;
+				strcpy(ifstream,"YYYY");
+				tstart = rawinput.pf.hdr.MJD_epoch;
 
 
 
-	/* hack to fix unconventional dec_str in BL guppi raw gits */
-	memset(tempbuf, 0x0, 16);
-	strcat(tempbuf, strtok((char *) 0, ":"));
-	padLen = 7 - strlen(tempbuf); // Calc Padding length
-    if(padLen < 0) padLen = 0;    // Avoid negative length
-    sprintf(tempbufl + strlen(tempbufl), "%*.*s%s", padLen, padLen, padding, tempbuf);  // LEFT Padding 
-
- 	src_dej = strtod(tempbufl, (char **) NULL);
-
-
-
-
-	for(i=0;i<gpu_spec[0].nspec;i++){
-		sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
-		gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");
-
-		foff =  rawinput.pf.hdr.df/gpu_spec[i].cufftN * -1;
-		nchans = gpu_spec[i].cufftN * rawinput.pf.hdr.nchan;
-		tsamp = gpu_spec[i].cufftN/(rawinput.pf.hdr.df * 1000000) * gpu_spec[i].integrationtime;
-		fch1= rawinput.pf.hdr.fctr + rawinput.pf.hdr.BW/2 + (0.5*foff) + hack;
-
-		/* dump filterbank header */
-		filterbank_header(gpu_spec[i].filterbank_file);
-	 }
-	
+				sprintf(source_name, "%s", rawinput.pf.hdr.source);
+				sprintf(inpfile, "%s", filname);
+				memset(tempbufl, 0x0, 256);
+				strcat(tempbufl, strtok(rawinput.pf.hdr.ra_str, ":"));
+   
+				strcat(tempbufl, strtok((char *) 0, ":"));
+				strcat(tempbufl, strtok((char *) 0, ":"));
+				src_raj = strtod(tempbufl, (char **) NULL);
+   
+				const char *padding = "000000000";
+				int padLen;
+				memset(tempbufl, 0x0, 256);
+				strcat(tempbufl, strtok(rawinput.pf.hdr.dec_str, ":"));
+				strcat(tempbufl, strtok((char *) 0, ":"));
 
 
- 
- 
- 
- 
-	  firsttime=0;
-}
+				/* hack to fix unconventional dec_str in BL guppi raw gits */
+				memset(tempbuf, 0x0, 16);
+				strcat(tempbuf, strtok((char *) 0, ":"));
+				padLen = 7 - strlen(tempbuf); // Calc Padding length
+				if(padLen < 0) padLen = 0;    // Avoid negative length
+				sprintf(tempbufl + strlen(tempbufl), "%*.*s%s", padLen, padLen, padding, tempbuf);  // LEFT Padding 
+
+				src_dej = strtod(tempbufl, (char **) NULL);
 
 
-					if(vflag>=1) {
-
-						 fprintf(stderr, "packetindex %Ld\n", rawinput.gf.packetindex);
-						 fprintf(stderr, "packetindex %Ld\n", rawinput.gf.packetindex);
-						 fprintf(stderr, "packetsize: %d\n\n", rawinput.gf.packetsize);
-						 fprintf(stderr, "n_packets %d\n", rawinput.gf.n_packets);
-						 fprintf(stderr, "n_dropped: %d\n\n",rawinput.gf.n_dropped);
-						 fprintf(stderr, "RA: %f\n\n",rawinput.pf.sub.ra);
-						 fprintf(stderr, "DEC: %f\n\n",rawinput.pf.sub.dec);
-						 fprintf(stderr, "subintoffset %f\n", rawinput.pf.sub.offs);
-						 fprintf(stderr, "tsubint %f\n", rawinput.pf.sub.tsubint);
 
 
-					}
+				for(i=0;i<gpu_spec[0].nspec;i++){
+					sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
+					gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");
+
+					foff =  rawinput.pf.hdr.df/gpu_spec[i].cufftN * -1;
+					nchans = gpu_spec[i].cufftN * rawinput.pf.hdr.nchan;
+					tsamp = gpu_spec[i].cufftN/(rawinput.pf.hdr.df * 1000000) * gpu_spec[i].integrationtime;
+					fch1= rawinput.pf.hdr.fctr + rawinput.pf.hdr.BW/2 + (0.5*foff) + hack;
+
+					/* dump filterbank header */
+					filterbank_header(gpu_spec[i].filterbank_file);
+				 }
+   
+
+				  firsttime=0;
+			}
+
+			if(vflag>1) {
+				 fprintf(stderr, "packetindex %Ld\n", rawinput.gf.packetindex);
+				 fprintf(stderr, "packetsize: %d\n", rawinput.gf.packetsize);
+				 fprintf(stderr, "n_packets %d\n", rawinput.gf.n_packets);
+				 fprintf(stderr, "n_dropped: %d\n",rawinput.gf.n_dropped);
+				 fprintf(stderr, "RA: %f\n",rawinput.pf.sub.ra);
+				 fprintf(stderr, "DEC: %f\n",rawinput.pf.sub.dec);
+				 fprintf(stderr, "subintoffset %f\n", rawinput.pf.sub.offs);
+				 fprintf(stderr, "tsubint %f\n", rawinput.pf.sub.tsubint);
+			}
 					
-			   		if(rawinput.gf.packetindex == curindx) {
+				  if(rawinput.gf.packetindex == curindx) {
 
-						 /* read a subint with correct index, read the data */
-						 fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
-						 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
-		
-						 if((long int)rv == rawinput.pf.sub.bytes_per_subint){
-							if(vflag>=1) fprintf(stderr,"read %d bytes from %ld in curfile %d\n", rawinput.pf.sub.bytes_per_subint, j, rawinput.curfile);
-						 	
-
-							
-							/* need to have each channel be contiguous */
-							/* copy in to buffer by an amount offset by the total channel offset + the offset within that channel */
-							/* need to make sure we only grab the non-overlapping piece */
-							for(i = 0; i < rawinput.pf.hdr.nchan; i++) {
-								memcpy(channelbuffer + (i * chanbytes) + (subint_cnt * chanbytes_subint), rawinput.pf.sub.data + (i * chanbytes_subint_total), chanbytes_subint);												
-							}
-							//memcpy(channelbuffer + (subint_cnt * rawinput.pf.sub.bytes_per_subint), rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-							subint_cnt++;
-							
-							
-						 	if(vflag>=1) fprintf(stderr, "copied %lld bytes subint cnt %ld\n", chanbytes * rawinput.pf.hdr.nchan, subint_cnt);
-						 	
-						 	if(subint_cnt == num_bufs) {
-								 fprintf(stderr, "calling gpu_channelize...");						 	
-								 subint_cnt=0;
-								 gpu_channelize(gpu_spec, nchannels, chanbytes);
-								 if(vflag>=1) fprintf(stderr, "waiting for accumulate...");						 	
-
-								 pthread_join(accumwrite_th0, NULL);
 					  
-								  /* now copy spectra to spectrum, or add spectra to spectrum */
-/*
-							   if (gpu_spec[0].nspec == 4) {
-								   pthread_join(accumwrite_th0, NULL);
-								   pthread_join(accumwrite_th1, NULL);
-								   pthread_join(accumwrite_th2, NULL);
-								   pthread_join(accumwrite_th3, NULL);
-								} else if (gpu_spec[0].nspec == 3) {
-								   pthread_join(accumwrite_th0, NULL);
-								   pthread_join(accumwrite_th1, NULL);
-								   pthread_join(accumwrite_th2, NULL);
-								} else if (gpu_spec[0].nspec == 2) {
-								   pthread_join(accumwrite_th0, NULL);
-								   pthread_join(accumwrite_th1, NULL);
-								} else if (gpu_spec[0].nspec == 1) {
-								   pthread_join(accumwrite_th0, NULL);
-								}	 
-*/								 
+					  /* read a subint with correct index, read the data */
+					  if(rawinput.pf.hdr.directio == 0){
+						  fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
+						  rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
+ 
+								//lseek(filehandle, gethlength(buf), SEEK_CUR);				
+ 								//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
+                          printf("read %ld\n", (long int) rv);
+					  } else {
+					  	  hlength = (long int) gethlength(buf);
+					  	  if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
+						  if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
+					  	  fseek(rawinput.fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
+							//lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
 
-						  for (i=0;i<gpu_spec[0].nspec;i++)	{
-							  if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
-								  memcpy(gpu_spec[i].spectrum, gpu_spec[i].spectra, nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN * sizeof(float));																						  
-								  gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
-								  gpu_spec[i].spectracnt = 0;
-							  }
-						  }
+						    rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);
 
-/*								 
-								for (i=0;i<gpu_spec[0].nspec;i++)	{
-									 if (gpu_spec[i].spectraperchannel >= gpu_spec[i].integrationtime) {								 									 
+ 							//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
 
-										  memcpy(gpu_spec[i].spectrum, gpu_spec[i].spectra, nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN * sizeof(float));																						  
+                          printf("read %ld\n", (long int) rv);
 
-									 } else {
+						  fseek(rawinput.fil, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
+						 //lseek(filehandle, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
 
-										 for(j = 0; j < (nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN); j++) {
-											  gpu_spec[i].spectrum[j] = gpu_spec[i].spectrum[j] + gpu_spec[i].spectra[j]; 						
-										 }	
-										 
-									}
-									if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
-										gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
-										gpu_spec[i].spectracnt = 0;
-									}
-								}
-*/
-								 
-								 pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write, (void *) &gpu_spec);
-/*
-								 
-								 if (gpu_spec[0].nspec == 4) {
-									pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
-									pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
-									pthread_create (&accumwrite_th2, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[2]);
-									pthread_create (&accumwrite_th3, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[3]);
-								 } else if (gpu_spec[0].nspec == 3) {
-									pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
-									pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
-									pthread_create (&accumwrite_th2, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[2]);
-								 } else if (gpu_spec[0].nspec == 2) {
-									pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
-									pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
-								 } else if (gpu_spec[0].nspec == 1) {
-									pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
-								 }
-								  
-*/
+					  }
+					  
+					  if((long int)rv == rawinput.pf.sub.bytes_per_subint){
+						 if(vflag>1) fprintf(stderr,"read %d bytes from %ld in curfile %d\n", rawinput.pf.sub.bytes_per_subint, j, rawinput.curfile);
+						  
+						 /* need to have each channel be contiguous */
+						 /* copy in to buffer by an amount offset by the total channel offset + the offset within that channel */
+						 /* need to make sure we only grab the non-overlapping piece */
+						 for(i = 0; i < rawinput.pf.hdr.nchan; i++) {
+							 memcpy(channelbuffer + (i * chanbytes) + (subint_cnt * chanbytes_subint), rawinput.pf.sub.data + (i * chanbytes_subint_total), chanbytes_subint);												
+						 }
+						 //memcpy(channelbuffer + (subint_cnt * rawinput.pf.sub.bytes_per_subint), rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
+						 subint_cnt++;
+			  
+			  
+						 if(vflag>=1) fprintf(stderr, "copied %lld bytes subint cnt %ld\n", chanbytes * rawinput.pf.hdr.nchan, subint_cnt);
+			  
+			
+					   } else {
+						   rawinput.fil = NULL;
+						   rawinput.invalid = 1;
+						   fprintf(stderr,"ERR: couldn't read as much as the header said we could... assuming corruption and exiting...\n");
+						   exit(1);
+					   }
+				   
+			  
+				   } else if(rawinput.gf.packetindex > curindx) {
+						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
+						/* read a subint with too high an indx, must have dropped a whole subintegration*/
+						/* don't read the subint, but increment the subint counter and allow old data to be rechannelized */
+						/* so that we maintain continuity in time... */
+						subint_cnt++;
+						//curindx = curindx + indxstep;
+					   /* We'll get the current valid subintegration again during the next time through this loop */
 
-								 // accumulate_write( (void *) gpu_spec);
-								  
-								  /* launch accumulate / disk write thread */								 
-								 
-								 /* perform summation if necessary */
+			  
+				   } else if(rawinput.gf.packetindex < curindx) {
+						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
+						/* somehow we were expecting a higher packet index than we got !?!? */
 
-								 
-								 
-								 
-								 //for(j=0;j<(nchannels * gpu_spec[i].cufftN);j++) gpu_spec[i].spectrum[j] = gpu_spec[i].spectrum[j] + gpu_spec[i].spectra[j];
-								//for(i=0;i<10;i++) fprintf(stderr, "EEE %f\n", spectrum[i]);
-								//fwrite(gpu_spec[i].spectra, sizeof(float), nchannels*gpu_spec[i].cufftN, highfreqfil); 
-							}
-							
-						 	if(vflag>=1) fprintf(stderr, "done\n");
+						/* we'll read past this subint and try again next time through */
 
+						 if(rawinput.pf.hdr.directio == 0){
+							 fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
+							 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
+ 
+								   //lseek(filehandle, gethlength(buf), SEEK_CUR);				
+								   //rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
 						 } else {
-						 	 rawinput.fil = NULL;
-						 	 rawinput.invalid = 1;
-							 fprintf(stderr,"ERR: couldn't read as much as the header said we could... assuming corruption and exiting...\n");
-							 exit(1);
+							 hlength = (long int) gethlength(buf);
+							 if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
+							 if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
+							 fseek(rawinput.fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
+							  //lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
+
+							 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);
+
+							   //rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
+
+							 printf("read %ld\n", (long int) rv);
+
+							 fseek(rawinput.fil, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
+							  //lseek(filehandle, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
+
 						 }
 						 
-					
-					} else if(rawinput.gf.packetindex > curindx) {
-						 fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
-						 /* read a subint with too high an indx, must have dropped a whole subintegration*/
-						 /* don't read the subint, but proceed with re-channelizing the previous subints data */
-						 /* so that we maintain continuity in time... */
-				
+						 curindx = curindx - indxstep;
 
-						/* channelbuffer *should* still contain the last valid subint */
-						 	
-						gpu_channelize(gpu_spec, nchannels, chanbytes);
-	
-						/* We'll get the current valid subintegration again during the next time through this loop */
+				   }
 
-					
-					} if(rawinput.gf.packetindex < curindx) {
-						 fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
-						 /* somehow we were expecting a higher packet index than we got !?!? */
-	
-						 /* try to read an extra spectra ahead */
-						 fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
-						 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
 
-						 if(fread(buf, sizeof(char), 32768, rawinput.fil) == 32768) {
-							  
-							  fseek(rawinput.fil, -32768, SEEK_CUR);
-							  guppi_read_obs_params(buf, &rawinput.gf, &rawinput.pf);	 
+				   if(subint_cnt == num_bufs) {
+						if(vflag>1) fprintf(stderr, "calling gpu_channelize...");						 	
+						subint_cnt=0;
+						gpu_channelize(gpu_spec, nchannels, nsamples);
+						if(vflag>1) fprintf(stderr, "waiting for accumulate...");						 	
 
-							  if(rawinput.gf.packetindex == curindx) {
-							  	  fprintf(stderr,"synced back up...\n");
+						  pthread_join(accumwrite_th0, NULL);
+						  pthread_join(accumwrite_th1, NULL);
+						  pthread_join(accumwrite_th2, NULL);
+						  pthread_join(accumwrite_th3, NULL);
 
-								  fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
-								  rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
-				 
-								  if((long int)rv == rawinput.pf.sub.bytes_per_subint){
-									 fprintf(stderr,"Read %d more bytes from %ld in curfile %d\n", rawinput.pf.sub.bytes_per_subint, j, rawinput.curfile);
+	 //								 pthread_join(accumwrite_th0, NULL);
+  
+		   /* now copy spectra to spectrum */
 		 
-		 
-		 									 
-									 /* need to make sure we only grab the non-overlapping piece */
-									 for(i = 0; i < rawinput.pf.hdr.nchan; i++) {
-										 memcpy(channelbuffer + (i * chanbytes), rawinput.pf.sub.data + (i * chanbytes_overlap), chanbytes);												
-									 }
-									 if(vflag>=1) fprintf(stderr, "copied %lld bytes\n", chanbytes * rawinput.pf.hdr.nchan);
-													
-									 gpu_channelize(gpu_spec, nchannels, chanbytes);
-								  
-								  
-								  } else {
-								  	 rawinput.fil = NULL;
-									 rawinput.invalid = 1;
-									 fprintf(stderr,"couldn't read as much as the header said we could... assuming corruption and exiting...\n");
-									 exit(1);
-								  }
+						 for (i=0;i<gpu_spec[0].nspec;i++)	{
+							 if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
+								 memcpy(gpu_spec[i].spectrum, gpu_spec[i].spectra, nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN * sizeof(float));																						  
+								 gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
+								 gpu_spec[i].spectracnt = 0;
 
-								} else {
-								  fprintf(stderr,"ERROR! skipped an extra packet, still off\n");
-								  /* this shouldn't happen very often....  but if it does, something is seriously wrong. */
-								  exit(1);
+								 /* launch accumulate / disk write thread */								 
+
+								if (i == 3) {
+								   pthread_create (&accumwrite_th3, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[3]);
+								} else if (i == 2) {
+								   pthread_create (&accumwrite_th2, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[2]);
+								} else if (i == 1) {
+								   pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
+								} else if (i == 0) {
+								   pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
 								}
-						 } else {
-							  /* file open but couldn't read 32KB */
-							  fclose(rawinput.fil);
-							  rawinput.fil = NULL;
-							  rawinput.curfile++;														 								 
-						 }								 
-					
-					}
 
-				} else {
+							 }
+						 }
 
-				/* file open but couldn't read 32KB */
-				   fclose(rawinput.fil);
-				   rawinput.fil = NULL;
-				   rawinput.curfile++;						
-				}
-		  }			 	 	 
+	 //								 pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write, (void *) &gpu_spec);												  									 				 
+				   }
+
+
+			   } else {
+
+			   /* file open but couldn't read 32KB */
+				  fclose(rawinput.fil);
+				  rawinput.fil = NULL;
+				  //close(filehandle);
+				  //filehandle=-1;
+				  rawinput.curfile++;						
+			   }
+		}			 	 	 
 	}
 
 										
 	if(rawinput.fil != NULL) curindx = curindx + indxstep;
+//	if(filehandle > 0) curindx = curindx + indxstep;
 
 
 } while(!(rawinput.invalid));
@@ -967,7 +927,6 @@ printf("start time %15.15Lg end time %15.15Lg %s %s barycentric velocity %15.15g
 
 
 	free(gpu_spec[0].channelbuffer);
-	fprintf(stderr, "freed channelbuffer...\n");
 
 	for(i=0;i<gpu_spec[0].nspec;i++){
 		free(gpu_spec[i].spectrum);
@@ -977,73 +936,11 @@ printf("start time %15.15Lg end time %15.15Lg %s %s barycentric velocity %15.15g
 		fclose(gpu_spec[i].filterbank_file);
 	}	
 	
-	fprintf(stderr, "cleaned up FFTs...\n");
 
-	
-	
-
-	fprintf(stderr, "closed output file...\n");
-
-
-    exit(1);
+    exit(0);
 
 
 }
-
-
-
-/*
-int channelize(struct diskinput *diskfiles)
-{
-int i,j,k;
-
-
-float lookup[4];
-lookup[0] = 3.3358750;
-lookup[1] = 1.0;
-lookup[2] = -1.0;
-lookup[3] = -3.3358750;
-
-
-// number of fft frames in channel buffer 
-long long int numframes;
-fprintf(stderr, "calculating nframes\n");
-
-numframes = (long long int) floor(diskfiles->channelbuffer_pos/diskfiles->cufftN);
-
-fprintf(stderr, "done\n");
-
-setQuant(lookup);
-cudaThreadSynchronize();
-
-fprintf(stderr, "executing fft over %lld frames \n", numframes);
-
-fprintf(stderr, "copying onto gpu: %d\n", cudaMemcpy(diskfiles->channelbufferd, diskfiles->channelbuffer, diskfiles->channelbuffer_pos, cudaMemcpyHostToDevice)); 
-
-		for(i = 0; i < numframes; i++) {
-		
-			explode_wrapper(diskfiles->channelbufferd + (diskfiles->cufftN * i), diskfiles->a_d, diskfiles->cufftN);
-			cudaThreadSynchronize();
-		
-			cufftExecC2C(diskfiles->plan, diskfiles->a_d, diskfiles->a_d, CUFFT_FORWARD); 
-			cudaThreadSynchronize();
-			detect_wrapper(diskfiles->a_d, diskfiles->cufftN, diskfiles->bandpassd, diskfiles->spectrumd);
-			cudaThreadSynchronize();
-		
-			cudaMemcpy(diskfiles->spectra + (i * diskfiles->cufftN), diskfiles->spectrumd, diskfiles->cufftN * sizeof(float), cudaMemcpyDeviceToHost);
-		
-		
-			// set the DC channel equal to the mean of the two adjacent channels
-			diskfiles->spectra[ (diskfiles->cufftN/2) + (i * diskfiles->cufftN) ] = (diskfiles->spectra[ (diskfiles->cufftN/2) + (i * diskfiles->cufftN) - 1 ] + diskfiles->spectra[ (diskfiles->cufftN/2) + (i * diskfiles->cufftN) + 1])/2;
-			
-		}	
-
-
-
-return 0;
-}
-
-*/
 
 int exists(const char *fname)
 {
@@ -1115,53 +1012,38 @@ unsigned long int fftlen;
 				if(vflag>1) fprintf(stderr, "spectraperchan %ld\n", gpu_spec[i].spectraperchannel);
 
 
-
-					   for (j = 0; j < nchannels; j = j + 1) {
-						  chanoffset = j * pointsperchannel;
-						  for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-							  integrationpnts = chanoffset + n * fftlen;							  
-							  for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
-							  	  offseta = integrationpnts + m * fftlen;							  	
-								  for(k = 0; k < fftlen; k++) {	
-										   /* the old (wrong) code */
-										  //gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + k] = gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + k] + gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + (m * gpu_spec[i].cufftN) + k];
-										  //gpu_spec[i].spectrum[(integrationpnts) + k] = gpu_spec[i].spectrum[(integrationpnts) + k] + gpu_spec[i].spectrum[(offseta) + k];						
-										  gpu_spec[i].spectrum[(integrationpnts) + k] += gpu_spec[i].spectrum[(offseta) + k];						
-
-								  }	
-							  }
-						   }
+				for (j = 0; j < nchannels; j = j + 1) {
+				   chanoffset = j * pointsperchannel;
+				   for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
+					   integrationpnts = chanoffset + n * fftlen;							  
+					   for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
+						   offseta = integrationpnts + m * fftlen;							  	
+						   for(k = 0; k < fftlen; k++) {	
+								   gpu_spec[i].spectrum[(integrationpnts) + k] += gpu_spec[i].spectrum[(offseta) + k];						
+						   }	
 					   }
-/*
-					   for (j = 0; j < nchannels; j = j + 1) {
-						  for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-							  for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
-								  	
-								  for(k = 0; k < gpu_spec[i].cufftN; k++) {	
-										  gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * gpu_spec[i].cufftN) + k] = gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * gpu_spec[i].cufftN) + k] + gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * gpu_spec[i].cufftN) + (m * gpu_spec[i].cufftN) + k];						
-								  }	
-							  }
-						   }
-					   }
-*/
+					}
+				}
 
-					 if(vflag>1)fprintf(stderr, "For instance %ld writing integrated spectra only\n", i);
-                      accumspectra = (float *) malloc (fftlen * nchannels * sizeof(float));
 
-					   for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-						   offseta = n * fftlen;
-						   for (j = 0; j < nchannels; j = j + 1) {						
-							memcpy(accumspectra + (j * fftlen) , gpu_spec[i].spectrum + ( offseta + (pointsperchannel * j) ), sizeof(float) * fftlen);
-							//fwrite(gpu_spec[i].spectrum + (offseta + (pointsperchannel * j) ), sizeof(float), fftlen, gpu_spec[i].filterbank_file);		
-							}
-					   		fwrite(accumspectra, sizeof(float), fftlen * nchannels, gpu_spec[i].filterbank_file);
-						
-					   }			
-					   free(accumspectra);
-					  /* DUMP TO FILE */																 
+			   if(vflag>1)fprintf(stderr, "For instance %ld writing integrated spectra only\n", i);
+				   accumspectra = (float *) malloc (fftlen * nchannels * sizeof(float));
 
+				   for (n = 0; n < gpu_spec[i].spectraperchannel; n = n + adjustedintegrationtime) {  								 	
+					   offseta = n * fftlen;
+					   for (j = 0; j < nchannels; j = j + 1) {						
+						memcpy(accumspectra + (j * fftlen) , gpu_spec[i].spectrum + ( offseta + (pointsperchannel * j) ), sizeof(float) * fftlen);
+						//fwrite(gpu_spec[i].spectrum + (offseta + (pointsperchannel * j) ), sizeof(float), fftlen, gpu_spec[i].filterbank_file);		
+						}
+						fwrite(accumspectra, sizeof(float), fftlen * nchannels, gpu_spec[i].filterbank_file);
+				  
+				   }			
+				   free(accumspectra);
+
+				/* DUMP TO FILE */																 
 				
 			   } else {								 									 
+
 					 if(vflag>1)fprintf(stderr, "For instance %ld writing complete spectra\n", i);
 
 					fwrite(gpu_spec[i].spectrum, sizeof(float), gpu_spec[i].cufftN * nchannels, gpu_spec[i].filterbank_file);		
@@ -1169,10 +1051,8 @@ unsigned long int fftlen;
 					  /* DUMP TO FILE */																 
 			   }
 
-				memset(gpu_spec[i].spectrum, 0x0, sizeof(float) * gpu_spec[i].cufftN * gpu_spec[i].spectraperchannel * nchannels);
 				gpu_spec[i].triggerwrite = 0;
-				/* ZERO the integrated spectrum */
-				
+
 			}
 
 	  }
@@ -1183,125 +1063,126 @@ unsigned long int fftlen;
 
 void accumulate_write_single(void *ptr){
 
-struct gpu_spectrometer *gpu_spec;
+	 struct gpu_spectrometer *gpu_spec;
 
-gpu_spec = (struct gpu_spectrometer *) ptr;
+	 gpu_spec = (struct gpu_spectrometer *) ptr;
 
-long int i,j,k,l,m,n;
 
-long int nchannels;
-long int pointsperchannel, pointsperintegration;
-nchannels = gpu_spec->rawinput->pf.hdr.nchan;
-long int adjustedintegrationtime;
+	 unsigned long int i,j,k,l,m,n;
+	 float * accumspectra;
+	 unsigned long int nchannels;
+	 unsigned long int pointsperchannel, pointsperintegration;
+	 nchannels = gpu_spec->rawinput->pf.hdr.nchan;
+	 unsigned long int adjustedintegrationtime;
+	 unsigned long int chanoffset;
+	 unsigned long int integrationpnts;
+	 unsigned long int offseta;
+	 unsigned long int fftlen;
 
-long int chanoffset;
-long int integrationpnts;
-long int offseta;
 	  
-			if (gpu_spec->triggerwrite != 0){
-										
-			   if (gpu_spec->spectraperchannel > 1) {								 									 
-				  //want to sum over all integration times...
-				  adjustedintegrationtime = (gpu_spec->integrationtime/gpu_spec->triggerwrite);
-				  pointsperchannel = gpu_spec->spectraperchannel * gpu_spec->cufftN;
-				  pointsperintegration =  adjustedintegrationtime * gpu_spec->cufftN;	
+	 if (gpu_spec->triggerwrite != 0){
+						   
+	   if (gpu_spec->spectraperchannel > 1) {								 									 
+		  //want to sum over all integration times...
+		  adjustedintegrationtime = (gpu_spec->integrationtime/gpu_spec->triggerwrite);
+		  pointsperchannel = gpu_spec->spectraperchannel * gpu_spec->cufftN;
+		  pointsperintegration =  adjustedintegrationtime * gpu_spec->cufftN;	
+		  fftlen = gpu_spec->cufftN;
+		if(vflag>1) fprintf(stderr, "adj int time: %ld pnts per channel: %ld  pnts per integration: %ld\n", adjustedintegrationtime, pointsperchannel, pointsperintegration);
+		if(vflag>1) fprintf(stderr, "spectraperchan %ld\n", gpu_spec->spectraperchannel);
 
-				if(vflag>1) fprintf(stderr, "adj int time: %ld pnts per channel: %ld  pnts per integration: %ld\n", adjustedintegrationtime, pointsperchannel, pointsperintegration);
-				if(vflag>1) fprintf(stderr, "spectraperchan %ld\n", gpu_spec->spectraperchannel);
 
+		 for (j = 0; j < nchannels; j = j + 1) {
+			chanoffset = j * pointsperchannel;
+			for (n = 0; n < gpu_spec->spectraperchannel; n = n + adjustedintegrationtime) {  								 	
+				integrationpnts = chanoffset + n * fftlen;							  
+				for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
+					offseta = integrationpnts + m * fftlen;							  	
+					for(k = 0; k < fftlen; k++) {	
+							gpu_spec->spectrum[(integrationpnts) + k] += gpu_spec->spectrum[(offseta) + k];						
 
-					   for (j = 0; j < nchannels; j = j + 1) {
-						  chanoffset = j * pointsperchannel;
-						  for (n = 0; n < gpu_spec->spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-							  integrationpnts = chanoffset + n * gpu_spec->cufftN;							  
-							  for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
-							  	  offseta = integrationpnts + m * gpu_spec->cufftN;							  	
-								  for(k = 0; k < gpu_spec->cufftN; k++) {	
-										   /* the old (wrong) code */
-										  //gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + k] = gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + k] + gpu_spec[i].spectrum[(j * pointsperchannel) +  (n * pointsperintegration) + (m * gpu_spec[i].cufftN) + k];
-										  //gpu_spec[i].spectrum[(integrationpnts) + k] = gpu_spec[i].spectrum[(integrationpnts) + k] + gpu_spec[i].spectrum[(offseta) + k];						
-										  gpu_spec->spectrum[(integrationpnts) + k] += gpu_spec->spectrum[(offseta) + k];						
+					}	
+				}
+			 }
+		 }
 
-								  }	
-							  }
-						   }
-					   }
-/*
-					   for (j = 0; j < nchannels; j = j + 1) {
-						  for (n = 0; n < gpu_spec->spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-							  for (m = 1; m < adjustedintegrationtime; m = m + 1) {  								 	
-								  for(k = 0; k < gpu_spec->cufftN; k++) {	
-										  gpu_spec->spectrum[(j * pointsperchannel) +  (n * gpu_spec->cufftN) + k] = gpu_spec->spectrum[(j * pointsperchannel) +  (n * gpu_spec->cufftN) + k] + gpu_spec->spectrum[(j * pointsperchannel) +  (n * gpu_spec->cufftN) + (m * gpu_spec->cufftN) + k];						
-								  }	
-							  }
-						   }
-					   }
-*/
+		if(vflag>1)fprintf(stderr, "For instance %ld writing integrated spectra only\n", i);
+		 accumspectra = (float *) malloc (fftlen * nchannels * sizeof(float));
 
-					 if(vflag>1)fprintf(stderr, "For instance %ld writing integrated spectra only\n", i);
+		  for (n = 0; n < gpu_spec->spectraperchannel; n = n + adjustedintegrationtime) {  								 	
+			  offseta = n * fftlen;
+			  for (j = 0; j < nchannels; j = j + 1) {						
+				   memcpy(accumspectra + (j * fftlen) , gpu_spec->spectrum + ( offseta + (pointsperchannel * j) ), sizeof(float) * fftlen);
+			  }
+		 
+			  fwrite(accumspectra, sizeof(float), fftlen * nchannels, gpu_spec->filterbank_file);
+	  
+		  }			
+		  free(accumspectra);
+   
+	   } else {								 									 
 
-					   for (n = 0; n < gpu_spec->spectraperchannel; n = n + adjustedintegrationtime) {  								 	
-						   for (j = 0; j < nchannels; j = j + 1) {						
-							fwrite(gpu_spec->spectrum + ( (n * gpu_spec->cufftN) + (pointsperchannel * j) ), sizeof(float), gpu_spec->cufftN, gpu_spec->filterbank_file);		
-							}
-					   }			
+		  if(vflag>1)fprintf(stderr, "For instance %ld writing complete spectra\n", i);
+		  fwrite(gpu_spec->spectrum, sizeof(float), gpu_spec->cufftN * nchannels, gpu_spec->filterbank_file);		
 
-					  /* DUMP TO FILE */																 
+	   }
 
-				
-			   } else {								 									 
-					 if(vflag>1)fprintf(stderr, "For instance %ld writing complete spectra\n", i);
-
-					fwrite(gpu_spec->spectrum, sizeof(float), gpu_spec->cufftN * nchannels, gpu_spec->filterbank_file);		
-
-					  /* DUMP TO FILE */																 
-			   }
-
-				memset(gpu_spec->spectrum, 0x0, sizeof(float) * gpu_spec->cufftN * gpu_spec->spectraperchannel * nchannels);
-				gpu_spec->triggerwrite = 0;
-				/* ZERO the integrated spectrum */
-				
-			}
+		gpu_spec->triggerwrite = 0;
+   
+	 }
 
 }
 
 
 
-void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, long long int chanbytes)
+void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, long long int nsamples)
 {
 
 	 long int i,j,k;
 	 long int nframes;
+	 cufftComplex tempcmplx[8];
+
 /* chan 0, pol 0, r, pol 0 i, pol 1 ... */
 
 	  i=0;
-	 fprintf(stderr, "center_freq: %f\n\n", gpu_spec[i].rawinput->pf.hdr.fctr);
-	 nframes = chanbytes / gpu_spec[i].cufftN;
+	 if(vflag>1) fprintf(stderr, "center_freq: %f\n\n", gpu_spec[i].rawinput->pf.hdr.fctr);
+	 nframes = nsamples / gpu_spec[i].cufftN;
 
-	 fprintf(stderr, "0x%08x 0x%08x\n", gpu_spec[0].channelbuffer[100], gpu_spec[0].channelbuffer[1]);
-
-	 fprintf(stderr, "%ld\n", (size_t) chanbytes * nchannels);
+	 if(vflag>1) fprintf(stderr, "%ld\n", (size_t) nsamples * nchannels);
 	 cudaThreadSynchronize();
 
 	 /* copy whole subint onto gpu */
-	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) chanbytes * nchannels, cudaMemcpyHostToDevice) ); 
 
 	 /* explode to a floating point array twice the length of nsamples, one for each polarization */
-	 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, chanbytes * nchannels);
+	 if(gpu_spec[i].rawinput->pf.hdr.nbits == 2) {
+	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels, cudaMemcpyHostToDevice) ); 
+		 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels);
+	 } else if (gpu_spec[i].rawinput->pf.hdr.nbits == 8) {
+	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd8, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
+		 explode8simple_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+	 }	
+
+
+//	HANDLE_ERROR( cudaMemcpy(tempcmplx, gpu_spec[i].a_d, 8 * sizeof(cufftComplex), cudaMemcpyDeviceToHost) );
+
+//    for(i=0;i<32;i=i+4) fprintf(stderr, "%08x %08x\n", gpu_spec[0].channelbuffer[i], gpu_spec[0].channelbuffer[i+1]);
+//    for(i=0;i<8;i++) fprintf(stderr, "%f %f\n", tempcmplx[i].x, tempcmplx[i].y);
+
+//	 exit(1);
 	 cudaThreadSynchronize();
 	 for(i=0;i<gpu_spec[0].nspec;i++){
 
 			HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
 
 			if (gpu_spec[i].spectracnt == 0) HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
-			detect_wrapper(gpu_spec[i].b_d, chanbytes * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			detect_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
 			gpu_spec[i].spectracnt++; 
 	   
 			cudaThreadSynchronize();
 			if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
-				HANDLE_ERROR( cudaMemcpy(gpu_spec[i].spectra, gpu_spec[i].spectrumd, chanbytes * nchannels * sizeof(float), cudaMemcpyDeviceToHost) );
+				HANDLE_ERROR( cudaMemcpy(gpu_spec[i].spectra, gpu_spec[i].spectrumd, nsamples * nchannels * sizeof(float), cudaMemcpyDeviceToHost) );
 			}
-			fprintf(stderr, "\n\n%f %f\n\n", gpu_spec[i].spectra[100], gpu_spec[i].spectra[1]);
+			if(vflag>1) fprintf(stderr, "\n\n%f %f\n\n", gpu_spec[i].spectra[100], gpu_spec[i].spectra[1]);
 	}
 
 /*
@@ -1894,7 +1775,7 @@ int little_endian() /*includefile*/
   if (strings_equal(ostype,"darwin")) return 0;
   fprintf(stderr,"Your OSTYPE environment variable is defined but not recognized!\n");
   fprintf(stderr,"Consult and edit little_endian in swap_bytes.c and then recompile\n");
-  fprintf(stderr,"the code if necessary... Contact dunc@naic.edu for further help\n");
+  fprintf(stderr,"the code if necessary... \n");
   exit(0);
 }
 

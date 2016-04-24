@@ -65,6 +65,7 @@ struct hdrinfo {
     int onlyI;              // 1 if the software will only record Stokes I
     int fd_hand;            // Receiver "handedness" or X/Y swap (+/-1)
     int be_phase;           // Backend poln cross-term phase convention (+/-1)
+	int directio;			// whether or not this file was written in DIRECTIO mode (0/1)
 };
 
 struct subint {

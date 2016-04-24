@@ -27,41 +27,59 @@
 
 #define DEBUGOUT 0
 
-#define get_dbl(key, param, def) {                                      \
-        if (hgetr8(buf, (key), &(param))==0) {                          \
-            if (DEBUGOUT)                                               \
-                printf("Warning:  %s not in status shm!\n", (key));     \
-            (param) = (def);                                            \
-        }                                                               \
+#define get_dbl(key, param, def) {                                           	 \
+  {																		     	 \
+		char tmpstr[48];													 	 \
+        if (hgetr8(buf, (key), &(param))==0) {                               	 \
+        	 if (hgets(buf, (key), (48), (tmpstr))==0) {                     	 \
+				 if (DEBUGOUT)                                               	 \
+					 printf("Warning:  %s not in status shm!\n", (key));     	 \
+				 (param) = (def);                                            	 \
+             } else {													     	 \
+             (param) = strtod(tmpstr, NULL);								 	 \
+        	 } 																 	 \
+        }                                                                    	 \
+    }																		 	 \
+  }
+#define get_int(key, param, def) {                                           	 \
+  {																		     	 \
+		char tmpstr[48];													 	 \
+        if (hgeti4(buf, (key), &(param))==0) {                               	 \
+        	 if (hgets(buf, (key), (48), (tmpstr))==0) {                     	 \
+				 if (DEBUGOUT)                                               	 \
+					 printf("Warning:  %s not in status shm!\n", (key));     	 \
+				 (param) = (def);                                            	 \
+             } else {													     	 \
+             (param) = atoi(tmpstr);								             \
+        	 } 		                                                             \
+        }                                                               		 \
+    }																			 \
     }
-
-#define get_int(key, param, def) {                                      \
-        if (hgeti4(buf, (key), &(param))==0) {                          \
-            if (DEBUGOUT)                                               \
-                printf("Warning:  %s not in status shm!\n", (key));     \
-            (param) = (def);                                            \
-        }                                                               \
+//atoi
+#define get_lon(key, param, def) {                                      		 \
+        {                                                               		 \
+            double dtmp;                                                		 \
+            char tmpstr[48];													 \
+            if (hgetr8(buf, (key), &dtmp)==0) {                                  \
+				 if (hgets(buf, (key), (48), (tmpstr))==0) {                     \
+					 if (DEBUGOUT)                                               \
+						 printf("Warning:  %s not in status shm!\n", (key));     \
+					 (param) = (def);                                            \
+				 } else {													     \
+				 (param) = atol(tmpstr);								         \
+				 } 		                                                         \
+            } else {                                                    		 \
+                (param) = (long long)(rint(dtmp));                      		 \
+            }                                                           		 \
+        }                                                               		 \
     }
-
-#define get_lon(key, param, def) {                                      \
-        {                                                               \
-            double dtmp;                                                \
-            if (hgetr8(buf, (key), &dtmp)==0) {                         \
-                if (DEBUGOUT)                                           \
-                    printf("Warning:  %s not in status shm!\n", (key)); \
-                (param) = (def);                                        \
-            } else {                                                    \
-                (param) = (long long)(rint(dtmp));                      \
-            }                                                           \
-        }                                                               \
-    }
-
-#define get_str(key, param, len, def) {                                 \
-        if (hgets(buf, (key), (len), (param))==0) {                     \
-            if (DEBUGOUT)                                               \
-                printf("Warning:  %s not in status shm!\n", (key));     \
-            strcpy((param), (def));                                     \
-        }                                                               \
+//atol
+#define get_str(key, param, len, def) {                                 		\
+        if (hgets(buf, (key), (len), (param))==0) {                     		\
+            if (DEBUGOUT)                                               		\
+                printf("String: Warning:  %s not in status shm!\n", (key));     \
+            strcpy((param), (def));                                     		\
+        }                                                               		\
     }
 
 #define exit_on_missing(key, param, val) {                              \
@@ -289,7 +307,8 @@ void guppi_read_obs_params(char *buf,
                            struct psrfits *p)
 {
     char base[200], dir[200];
-
+	char tempstr[200];
+	memset(tempstr, 0x0, 200);
     // Software data-stream modification params
     get_int("DS_TIME", p->hdr.ds_time_fact, 1); // Time down-sampling
     get_int("DS_FREQ", p->hdr.ds_freq_fact, 1); // Freq down-sampling
@@ -311,6 +330,8 @@ void guppi_read_obs_params(char *buf,
     if (p->hdr.df==0.0) p->hdr.df = p->hdr.BW/p->hdr.nchan;
     get_dbl("SCANLEN", p->hdr.scanlen, 0.0);
     get_int("NRCVR", p->hdr.rcvr_polns, 2);
+    get_int("DIRECTIO", p->hdr.directio, 0);
+
     p->hdr.orig_df = p->hdr.df;
     p->hdr.orig_nchan = p->hdr.nchan;
 

@@ -7,12 +7,43 @@ extern "C" void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, 
 extern "C" void setQuant(float *lut);
 extern "C" void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
 extern "C" void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
+extern "C" void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+extern "C" void explode8init_wrapper(char *channelbufferd, int veclen);
+extern "C" void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
 
 
 __constant__ float gpu_qlut[4];
 __constant__ float meand;
 __constant__ float stddevd;
 
+texture<char, cudaTextureType1D, cudaReadModeNormalizedFloat> char_tex;
+
+
+__global__ void explode8(char *channelbuffer, cufftComplex * voltages, int veclen) {
+
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+	 if(tid < veclen) {	 
+		  voltages[tid].x = tex1Dfetch(char_tex, channelbuffer[4*tid]); 
+		  voltages[tid].y = tex1Dfetch(char_tex, channelbuffer[4*tid + 1]);
+		  voltages[veclen + tid].x = tex1Dfetch(char_tex, channelbuffer[4*tid + 2]); 
+		  voltages[veclen + tid].y = tex1Dfetch(char_tex, channelbuffer[4*tid + 3]);
+	 }
+	 
+}
+
+__global__ void explode8simple(char *channelbuffer, cufftComplex * voltages, int veclen) {
+
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+	 if(tid < veclen) {	 
+		  voltages[tid].x = (float) channelbuffer[4*tid]; 
+		  voltages[tid].y = (float) channelbuffer[4*tid + 1];
+		  voltages[veclen + tid].x = (float) channelbuffer[4*tid + 2]; 
+		  voltages[veclen + tid].y = (float) channelbuffer[4*tid + 3];
+	 }
+
+}
 
 __global__ void explode(unsigned char *channelbuffer, cufftComplex * voltages, int veclen) {
 
@@ -73,12 +104,28 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen) {
 	explode<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
-	//fprintf(stderr, "exploding...\n");
 }
 
 void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
 	detect<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
 }
+
+
+//veclen is number of complex elements, so length of channelbufferd is 2 x veclen
+void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
+	explode8<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+}
+
+
+//veclen is number of complex elements, so length of channelbufferd is 2 x veclen
+void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
+	explode8simple<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+}
+
+void explode8init_wrapper(char *channelbufferd, int length) {
+	cudaBindTexture(0, char_tex, channelbufferd, length);
+}
+
 
 
 
