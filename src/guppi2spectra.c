@@ -747,7 +747,6 @@ do{
  
 								//lseek(filehandle, gethlength(buf), SEEK_CUR);				
  								//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-                          printf("read %ld\n", (long int) rv);
 					  } else {
 					  	  hlength = (long int) gethlength(buf);
 					  	  if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
@@ -759,7 +758,6 @@ do{
 
  							//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
 
-                          printf("read %ld\n", (long int) rv);
 
 						  fseek(rawinput.fil, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
 						 //lseek(filehandle, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
@@ -1159,7 +1157,8 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 		 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels);
 	 } else if (gpu_spec[i].rawinput->pf.hdr.nbits == 8) {
 	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd8, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
-		 explode8simple_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+		 //explode8simple_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+		 explode8_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
 	 }	
 
 
