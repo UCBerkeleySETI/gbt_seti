@@ -2,21 +2,36 @@
 #include "guppi2spectra_gpu.h"
 #include <stdio.h>
 
+
+static void HandleError( cudaError_t err,
+                         const char *file,
+                         int line ) {
+    if (err != cudaSuccess) {
+        printf( "%s in %s at line %d\n", cudaGetErrorString( err ),
+                file, line );
+        exit( EXIT_FAILURE );
+    }
+}
+#define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
+
 extern "C" void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 extern "C" void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern "C" void setQuant(float *lut);
+extern "C" void setQuant8(float *lut);
 extern "C" void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
 extern "C" void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
 extern "C" void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
 extern "C" void explode8init_wrapper(char *channelbufferd, int veclen);
 extern "C" void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+extern "C" void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
 
 
 __constant__ float gpu_qlut[4];
+__constant__ float gpu_qlut8[256];
 __constant__ float meand;
 __constant__ float stddevd;
 
-texture<char, cudaTextureType1D, cudaReadModeNormalizedFloat> char_tex;
+texture<char, cudaTextureType1D, cudaReadModeElementType> char_tex;
 
 
 __global__ void explode8(char *channelbuffer, cufftComplex * voltages, int veclen) {
@@ -41,6 +56,19 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 		  voltages[tid].y = (float) channelbuffer[4*tid + 1];
 		  voltages[veclen + tid].x = (float) channelbuffer[4*tid + 2]; 
 		  voltages[veclen + tid].y = (float) channelbuffer[4*tid + 3];
+	 }
+
+}
+
+__global__ void explode8lut(char *channelbuffer, cufftComplex * voltages, int veclen) {
+
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+
+	 if(tid < veclen) {	 
+		  voltages[tid].x = gpu_qlut8[channelbuffer[4*tid]]; 
+		  voltages[tid].y = gpu_qlut8[channelbuffer[4*tid + 1]];
+		  voltages[veclen + tid].x = gpu_qlut8[channelbuffer[4*tid + 2]]; 
+		  voltages[veclen + tid].y = gpu_qlut8[channelbuffer[4*tid + 3]];
 	 }
 
 }
@@ -113,19 +141,23 @@ void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *band
 
 //veclen is number of complex elements, so length of channelbufferd is 4 x veclen
 void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
-	cudaBindTexture(0, char_tex, channelbufferd, veclen*4);
 	explode8<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
-    cudaUnbindTexture(char_tex);
 }
 
 
 //veclen is number of complex elements, so length of channelbufferd is 2 x veclen
+void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
+	explode8lut<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+}
+
+
 void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
 	explode8simple<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
 }
 
 void explode8init_wrapper(char *channelbufferd, int length) {
-	cudaBindTexture(0, char_tex, channelbufferd, length);
+    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindSigned);
+	HANDLE_ERROR( cudaBindTexture(0, char_tex, channelbufferd, channelDesc, length) );
 }
 
 
@@ -136,6 +168,15 @@ void setQuant(float *lut) {
         fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol(gpu_qlut, lut, 16, 0, cudaMemcpyHostToDevice)));
 #else
         fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol("gpu_qlut", lut, 16, 0, cudaMemcpyHostToDevice)));
+#endif
+
+}
+
+void setQuant8(float *lut) {
+#if CUDA_VERSION >= 4500
+        fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol(gpu_qlut8, lut, 1024, 0, cudaMemcpyHostToDevice)));
+#else
+        fprintf(stderr, "loading lookuptable...%s\n", cudaGetErrorString(cudaMemcpyToSymbol("gpu_qlut8", lut, 1024, 0, cudaMemcpyHostToDevice)));
 #endif
 
 }

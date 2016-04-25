@@ -6,3 +6,4 @@ __global__ void normalize(float * tree_dedopplerd_pntr, int tdwidth);
 __global__ void vecdivide(float * spectrumd, float * divisord, int tdwidth);
 __global__ void explode8(char *channelbuffer, cufftComplex * voltages, int veclen);
 __global__ void explode8simple(char *channelbuffer, cufftComplex * voltages, int veclen);
+__global__ void explode8lut(char *channelbuffer, cufftComplex * voltages, int veclen);
