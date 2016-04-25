@@ -31,7 +31,7 @@ __constant__ float gpu_qlut8[256];
 __constant__ float meand;
 __constant__ float stddevd;
 
-texture<char, cudaTextureType1D, cudaReadModeElementType> char_tex;
+texture<char, cudaTextureType1D, cudaReadModeNormalizedFloat> char_tex;
 
 
 __global__ void explode8(char *channelbuffer, cufftComplex * voltages, int veclen) {
@@ -141,7 +141,7 @@ void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *band
 
 //veclen is number of complex elements, so length of channelbufferd is 4 x veclen
 void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
-	explode8<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+	explode8<<<(veclen+1023)/1024,1024>>>(channelbufferd, voltages, veclen);
 }
 
 
@@ -156,8 +156,7 @@ void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int v
 }
 
 void explode8init_wrapper(char *channelbufferd, int length) {
-    cudaChannelFormatDesc channelDesc = cudaCreateChannelDesc(8, 8, 8, 8, cudaChannelFormatKindSigned);
-	HANDLE_ERROR( cudaBindTexture(0, char_tex, channelbufferd, channelDesc, length) );
+	HANDLE_ERROR( cudaBindTexture(0, char_tex, channelbufferd, length) );
 }
 
 
