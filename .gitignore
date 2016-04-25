@@ -24,6 +24,7 @@ src/rawdopplersearch
 src/rawfilterbank
 src/rawfilterbank_singleband_xy
 src/tags
+src/test_guppi2spectra
 src/test_psrfits_read
 src/treedop
 src/two2eight

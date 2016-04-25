@@ -23,7 +23,7 @@ CFLAGS = -ggdb -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include
 PROGS = test_psrfits_read \
 	raw_quant raw_read rawdopplersearch massage_vpm \
 	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2
-GPU_PROGS = gpuspec raw2wu
+GPU_PROGS = gpuspec raw2wu test_guppi2spectra
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o\
 	write_psrfits.o read_psrfits.o misc_utils.o \
@@ -92,6 +92,9 @@ $(SLALIB): $(SLAOBJS)
 
 guppi2spectra_gpu.o: guppi2spectra_gpu.cu
 	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o
+
+test_guppi2spectra: test_guppi2spectra.c guppi2spectra_gpu.o
+	$(CC) $(CFLAGS) -fno-strict-aliasing test_guppi2spectra.c -o $@ guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
 
 gpuspec: guppi2spectra.c guppi2spectra_gpu.o $(SLALIB)
 	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
