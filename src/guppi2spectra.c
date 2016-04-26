@@ -69,9 +69,9 @@ extern void setQuant8(float *lut);
 extern void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
 extern void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
 extern void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern void explode8init_wrapper(char *channelbufferd, int length);
+extern void explode8init_wrapper(char *channelbufferd, long int length);
 extern void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+extern void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 
 /* gpu spectrometer structure */
 /* one of these for each cufft plan that will operate on a block of raw voltage data */
@@ -604,15 +604,21 @@ do{
 					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  chanbytes * nchannels) );  	
 
 				} else if (rawinput.pf.hdr.nbits == 8) {
-					if(vflag>0) fprintf(stderr,"Initializing for 8 bits...\n");
+					if(vflag>0) fprintf(stderr,"Initializing for 8 bits... chanbytes: %ld nchannels: %ld\n", chanbytes, nchannels);
 
-					//float lookup[256];
-					 //for(i=0;i<128;i++) lookup[i] = (float) i;
-					 //for(i=128;i<256;i++) lookup[i] = (float) (i - 256);
-					//setQuant8(lookup);
 
-					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd8),  chanbytes * nchannels) );  	
-					explode8init_wrapper(gpu_spec[0].channelbufferd8, chanbytes * nchannels);
+					//HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd8),  chanbytes * nchannels) );  	
+//				    HANDLE_ERROR ( cudaThreadSynchronize() );
+
+//					explode8init_wrapper(gpu_spec[0].channelbufferd8, chanbytes * nchannels);
+
+					/* try unsigned for lookup table... */
+					float lookup[256];
+					for(i=0;i<128;i++) lookup[i] = (float) i;
+					for(i=128;i<256;i++) lookup[i] = (float) (i - 256);
+					setQuant8(lookup);
+					HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  chanbytes * nchannels) );  	
+
 				}
 
 				HANDLE_ERROR ( cudaThreadSynchronize() );
@@ -1143,7 +1149,6 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 	 long int i,j,k;
 	 long int nframes;
-	 cufftComplex tempcmplx[2048];
 
 /* chan 0, pol 0, r, pol 0 i, pol 1 ... */
 
@@ -1161,20 +1166,21 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels, cudaMemcpyHostToDevice) ); 
 		 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels);
 	 } else if (gpu_spec[i].rawinput->pf.hdr.nbits == 8) {
-	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd8, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
+	 	 //HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd8, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
 		 //explode8simple_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
-		 explode8_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
-		 //explode8lut_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+		 //explode8_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+
+	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
+		 explode8lut_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels); 
 
 	 }	
 
+//	 cufftComplex tempcmplx[2048];
+//	HANDLE_ERROR( cudaMemcpy(tempcmplx, gpu_spec[i].a_d, 2048 * sizeof(cufftComplex), cudaMemcpyDeviceToHost) );
+//    for(i=128;i<256;i=i+4) fprintf(stderr, "%08x %08x\n", gpu_spec[0].channelbuffer[i], gpu_spec[0].channelbuffer[i+1]);
+//    for(i=32;i<96;i++) fprintf(stderr, "%f %f\n", tempcmplx[i].x, tempcmplx[i].y);
+//	 exit(1);
 
-	HANDLE_ERROR( cudaMemcpy(tempcmplx, gpu_spec[i].a_d, 2048 * sizeof(cufftComplex), cudaMemcpyDeviceToHost) );
-
-    for(i=128;i<256;i=i+4) fprintf(stderr, "%08x %08x\n", gpu_spec[0].channelbuffer[i], gpu_spec[0].channelbuffer[i+1]);
-    for(i=32;i<96;i++) fprintf(stderr, "%f %f\n", tempcmplx[i].x, tempcmplx[i].y);
-
-	 exit(1);
 	 cudaThreadSynchronize();
 	 for(i=0;i<gpu_spec[0].nspec;i++){
 

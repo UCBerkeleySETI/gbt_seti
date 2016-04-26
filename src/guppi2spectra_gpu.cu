@@ -21,9 +21,9 @@ extern "C" void setQuant8(float *lut);
 extern "C" void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
 extern "C" void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
 extern "C" void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern "C" void explode8init_wrapper(char *channelbufferd, int veclen);
+extern "C" void explode8init_wrapper(char *channelbufferd, long int length);
 extern "C" void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern "C" void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+extern "C" void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 
 
 __constant__ float gpu_qlut[4];
@@ -60,7 +60,7 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 }
 
-__global__ void explode8lut(char *channelbuffer, cufftComplex * voltages, int veclen) {
+__global__ void explode8lut(unsigned char *channelbuffer, cufftComplex * voltages, int veclen) {
 
 int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
@@ -146,7 +146,7 @@ void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen)
 
 
 //veclen is number of complex elements, so length of channelbufferd is 2 x veclen
-void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
+void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen) {
 	explode8lut<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
 }
 
@@ -155,7 +155,7 @@ void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int v
 	explode8simple<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
 }
 
-void explode8init_wrapper(char *channelbufferd, int length) {
+void explode8init_wrapper(char *channelbufferd, long int length) {
 	HANDLE_ERROR( cudaBindTexture(0, char_tex, channelbufferd, length) );
 }
 
