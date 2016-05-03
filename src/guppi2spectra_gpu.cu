@@ -16,6 +16,8 @@ static void HandleError( cudaError_t err,
 
 extern "C" void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 extern "C" void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+extern "C" void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+extern "C" void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern "C" void setQuant(float *lut);
 extern "C" void setQuant8(float *lut);
 extern "C" void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
@@ -106,6 +108,30 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 	 }
 }
 
+__global__ void detectX(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
+
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+
+//73 - (73%16) + (73 + 8)%16
+
+	 if(tid < veclen) {
+		  //spectrumd[tid] = ((voltages[((tid+fftlen/2)%fftlen)].x * voltages[((tid+fftlen/2)%fftlen)].x) + (voltages[((tid+fftlen/2)%fftlen)].y * voltages[((tid+fftlen/2)%fftlen)].y) + (voltages[fftlen + ((tid+fftlen/2)%fftlen)].x * voltages[fftlen + ((tid+fftlen/2)%fftlen)].x)+ (voltages[fftlen + ((tid+fftlen/2)%fftlen)].y * voltages[fftlen + ((tid+fftlen/2)%fftlen)].y))/bandpassd[tid];	 		  
+		  spectrumd[tid] = spectrumd[tid] + ((voltages[indx].x * voltages[indx].x) + (voltages[indx].y * voltages[indx].y));	 		  
+	 }
+}
+__global__ void detectY(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
+
+int tid = threadIdx.x + blockIdx.x * blockDim.x;
+int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+
+//73 - (73%16) + (73 + 8)%16
+
+	 if(tid < veclen) {
+		  //spectrumd[tid] = ((voltages[((tid+fftlen/2)%fftlen)].x * voltages[((tid+fftlen/2)%fftlen)].x) + (voltages[((tid+fftlen/2)%fftlen)].y * voltages[((tid+fftlen/2)%fftlen)].y) + (voltages[fftlen + ((tid+fftlen/2)%fftlen)].x * voltages[fftlen + ((tid+fftlen/2)%fftlen)].x)+ (voltages[fftlen + ((tid+fftlen/2)%fftlen)].y * voltages[fftlen + ((tid+fftlen/2)%fftlen)].y))/bandpassd[tid];	 		  
+		  spectrumd[tid] = spectrumd[tid] + ((voltages[veclen + indx].x * voltages[veclen + indx].x)+ (voltages[veclen + indx].y * voltages[veclen + indx].y));	 		  
+	 }
+}
 
 
 __global__ void normalize(float * tree_dedopplerd_pntr, int tdwidth)  {
@@ -138,6 +164,13 @@ void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *band
 	detect<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
 }
 
+void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
+	detectX<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+}
+
+void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
+	detectY<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+}
 
 //veclen is number of complex elements, so length of channelbufferd is 4 x veclen
 void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
