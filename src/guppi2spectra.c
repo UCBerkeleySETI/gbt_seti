@@ -639,7 +639,7 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 cudaThreadSynchronize();
 
 HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
-if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
+if(vflag>=1) fprintf(stderr,"Done: Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
 
 /* Now let's do the filterbank headers... */
 
@@ -687,7 +687,7 @@ src_dej = strtod(tempbufl, (char **) NULL);
 
 
 
-
+if(vflag>=1) fprintf(stderr,"Writing filterbank headers...\n");
 for(i=0;i<gpu_spec[0].nspec;i++){
 	sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
 	gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");

@@ -183,8 +183,8 @@ void guppi_read_subint_params(char *buf,
     get_dbl("AZ", p->sub.tel_az, 0.0);
     if (p->sub.tel_az < 0.0) p->sub.tel_az += 360.0;
     get_dbl("ZA", p->sub.tel_zen, 0.0);
-    get_dbl("RA", p->sub.ra, 0.0);
-    get_dbl("DEC", p->sub.dec, 0.0);
+    get_dbl("RA", p->sub.ra, 10.1);
+    get_dbl("DEC", p->sub.dec, 10.1);
 
     // Backend HW parameters
     get_int("ACC_LEN", g->decimation_factor, 0);
@@ -352,8 +352,8 @@ void guppi_read_obs_params(char *buf,
     else
         p->hdr.summed_polns = 0;
     get_str("TRK_MODE", p->hdr.track_mode, 16, "Unknown");
-    get_str("RA_STR", p->hdr.ra_str, 16, "Unknown");
-    get_str("DEC_STR", p->hdr.dec_str, 16, "Unknown");
+    get_str("RA_STR", p->hdr.ra_str, 16, "00:00:00.0");
+    get_str("DEC_STR", p->hdr.dec_str, 16, "+00:00:00.0");
     // Should set other cal values if CAL_MODE is on
     get_str("CAL_MODE", p->hdr.cal_mode, 8, "Unknown");
     if (!(strcmp(p->hdr.cal_mode, "OFF")==0)) {  // Cals not off
