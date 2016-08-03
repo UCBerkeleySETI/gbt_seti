@@ -1,3 +1,5 @@
+#define MAXSIZE 134000000
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -615,12 +617,19 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	gpu_spec[i].bandpass = (float *) malloc (gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectra = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectrum = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
-	if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
+
 	if(vflag>=1) fprintf(stderr,"Spectra per channel for this mode: %ld\n", gpu_spec[i].spectraperchannel);        		
     if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
 
-	HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
-	HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
+	if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
+		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld (SPLIT)\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize/2);
+		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2) );		
+		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2, &worksize) );
+	} else {
+		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
+		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
+		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
+	}
 
 	if(vflag>=1) fprintf(stderr,"Estimated Size of Work Space: %ld\n", (long int) (((double) worksize) /  1048576.0) );
 	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].bandpassd), gpu_spec[i].cufftN * sizeof(float)) );
@@ -692,10 +701,10 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
 	gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");
 
-	foff =  rawinput.pf.hdr.df/gpu_spec[i].cufftN * -1;
+	foff =  fabs(rawinput.pf.hdr.df)/gpu_spec[i].cufftN * -1;
 	nchans = gpu_spec[i].cufftN * rawinput.pf.hdr.nchan;
-	tsamp = gpu_spec[i].cufftN/(rawinput.pf.hdr.df * 1000000) * gpu_spec[i].integrationtime;
-	fch1= rawinput.pf.hdr.fctr + rawinput.pf.hdr.BW/2 + (0.5*foff) + hack;
+	tsamp = gpu_spec[i].cufftN/(fabs(rawinput.pf.hdr.df) * 1000000) * gpu_spec[i].integrationtime;
+	fch1= rawinput.pf.hdr.fctr + fabs(rawinput.pf.hdr.BW)/2 + (0.5*foff) + hack;
 
 	/* dump filterbank header */
 	filterbank_header(gpu_spec[i].filterbank_file);
@@ -1198,7 +1207,17 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 	 cudaThreadSynchronize();
 	 for(i=0;i<gpu_spec[0].nspec;i++){
 
-			HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+
+			if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
+
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), gpu_spec[i].b_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), CUFFT_FORWARD) ); 
+
+			} else {
+
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+			
+			}
 
 			if (gpu_spec[i].spectracnt == 0) HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
 			detect_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
