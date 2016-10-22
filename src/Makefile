@@ -114,8 +114,9 @@ slalib-check: slalib
 
 install: install-progs install-libs
 	mkdir -p $(prefix)
-	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' > $(prefix)/listen.sh
-	echo 'export PATH="$${PATH}:$(BINDIR)"'                      >> $(prefix)/listen.sh
+	echo 'test -e $(CUDA)/cuda.sh && source $(CUDA)/cuda.sh'       > $(prefix)/listen.sh
+	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' >> $(prefix)/listen.sh
+	echo 'export PATH="$${PATH}:$(BINDIR)"'                       >> $(prefix)/listen.sh
 
 install-progs: $(PROGS) $(GPU_PROGS)
 	mkdir -p $(BINDIR)
