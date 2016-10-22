@@ -1,12 +1,16 @@
 #ifdef HAVE_CONFIG_H
 #include <config.h>
 #endif
-/* read_header.c - general handling routines for SIGPROC headers */
+/* read_filterbank_header.c - general handling routines for SIGPROC headers */
+/* heisted and mangled from sigproc 4.3 Oct 2016 AS */
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include "filterbank_header.h"
+#include "imswap.h"
+
 int nbins;
 double period;
 

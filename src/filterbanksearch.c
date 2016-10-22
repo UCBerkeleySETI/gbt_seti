@@ -28,6 +28,7 @@
 #include "barycenter.h"
 #include <pthread.h>
 #include "filterbank_header.h"
+#include "filterbankutil.h"
 
 
 /*
@@ -57,11 +58,14 @@ Number of IFs                    : 1
 
 int sum_filterbank(struct filterbank_input *input);
 
+double filterbank_chan_freq(struct filterbank_input *input, long int channel);
 
 int main(int argc, char *argv[]) {
 
 	struct filterbank_input sourcea;	
 	struct filterbank_input sourceb;
+	
+
 	
 	float *diff_spectrum;
 	if(argc < 2) {
@@ -69,7 +73,7 @@ int main(int argc, char *argv[]) {
 	}
 
 	int c;
-	int i,j,k;
+	long int i,j,k;
 	opterr = 0;
  
 	while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:m:a:")) != -1)
@@ -110,7 +114,12 @@ int main(int argc, char *argv[]) {
 
     for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourcea.integrated_spectrum[i] - sourceb.integrated_spectrum[i])/sourceb.integrated_spectrum[i];
 
-    for(i=0;i<sourcea.nchans;i++) printf("%f, %f, %f\n", sourcea.integrated_spectrum[i], sourceb.integrated_spectrum[i], diff_spectrum[i]); 
+	normalize(diff_spectrum, (long int) sourcea.nchans);
+
+
+
+
+    for(i=0;i<8;i++) printf("%f, %f, %f\n", sourcea.integrated_spectrum[i], sourceb.integrated_spectrum[i], diff_spectrum[i]); 
 
 	//fprintf(stderr, "src_raj: %lf src_decj: %lf\n", sourcea.src_raj, sourcea.src_dej);
 
@@ -121,7 +130,7 @@ return 0;
 
 
 int sum_filterbank(struct filterbank_input *input) {
-	int i,j,k;
+	long int i,j,k;
     input->integrated_spectrum = (float*) malloc(input->nchans * sizeof(float));
 	memset(input->integrated_spectrum, 0x0, input->nchans * sizeof(float));
 
@@ -134,3 +143,11 @@ int sum_filterbank(struct filterbank_input *input) {
     }
     return j;
 }
+
+
+
+
+
+
+
+

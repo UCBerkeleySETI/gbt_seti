@@ -1,6 +1,6 @@
 /* global variables describing the data */
-
-
+#pragma once
+ 
 struct filterbank_input {
 	FILE *inputfile;
 	char *rawdatafile, source_name[80];
