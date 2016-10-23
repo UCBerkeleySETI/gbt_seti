@@ -1,18 +1,8 @@
-#ifdef HAVE_CONFIG_H
-#include <config.h>
-#endif
 /* read_filterbank_header.c - general handling routines for SIGPROC headers */
 /* heisted and mangled from sigproc 4.3 Oct 2016 AS */
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <math.h>
-#include <string.h>
 #include "filterbank_header.h"
-#include "imswap.h"
 
-int nbins;
-double period;
+
 
 int strings_equal (char *string1, char *string2) /* includefile */
 {
@@ -98,8 +88,8 @@ int read_filterbank_header(struct filterbank_input *input)
       totalbytes+=sizeof(input->tsamp);
 
     } else if (strings_equal(string,"period")) {
-      fread(&period,sizeof(period),1,input->inputfile);
-      totalbytes+=sizeof(period);
+      fread(&(input->period),sizeof(input->period),1,input->inputfile);
+      totalbytes+=sizeof(input->period);
 
     } else if (strings_equal(string,"fch1")) {
       fread(&(input->fch1),sizeof(input->fch1),1,input->inputfile);
@@ -151,8 +141,8 @@ int read_filterbank_header(struct filterbank_input *input)
       totalbytes+=sizeof(input->pulsarcentric);
 
     } else if (strings_equal(string,"nbins")) {
-      fread(&nbins,sizeof(nbins),1,input->inputfile);
-      totalbytes+=sizeof(nbins);
+      fread(&(input->nbins),sizeof(input->nbins),1,input->inputfile);
+      totalbytes+=sizeof(input->nbins);
 
     } else if (strings_equal(string,"nsamples")) {
       /* read this one only for backwards compatibility */
@@ -191,7 +181,7 @@ int read_filterbank_header(struct filterbank_input *input)
     if (totalbytes != ftell(input->inputfile)){
 	    fprintf(stderr,"ERROR: Header bytes does not equal file position\n");
 	    fprintf(stderr,"String was: '%s'\n",string);
-	    fprintf(stderr,"       header: %d file: %d\n",totalbytes,ftell(input->inputfile));
+	    fprintf(stderr,"       header: %d file: %ld\n",totalbytes,ftell(input->inputfile));
 	    exit(1);
     }
 
@@ -203,9 +193,19 @@ int read_filterbank_header(struct filterbank_input *input)
 
   if (totalbytes != ftell(input->inputfile)){
 	  fprintf(stderr,"ERROR: Header bytes does not equal file position\n");
-	  fprintf(stderr,"       header: %d file: %d\n",totalbytes,ftell(input->inputfile));
+	  fprintf(stderr,"       header: %d file: %ld\n",totalbytes,ftell(input->inputfile));
 	  exit(1);
   }
+
+  input->datasize = sizeof_file(input->filename);
+  input->headersize = (long int) totalbytes;
+  
+  input->datasize=sizeof_file(input->filename)-input->headersize;
+  input->nsamples=(long long) (long double) input->datasize/ (((long double) input->nbits) / 8.0) 
+		 /(long double) input->nifs/(long double) input->nchans;
+  
+
+
 
   /* return total number of bytes read */
   return totalbytes;

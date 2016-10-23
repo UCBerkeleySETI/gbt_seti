@@ -107,3 +107,34 @@ void normalize (float *vec, long int veclen) {
     for(i=0;i<veclen;i++) vec[i] = (vec[i] - tmpmeanf)/ tmpstdf;
 
 }
+
+
+long long sizeof_file(char name[]) /* includefile */
+{
+     struct stat stbuf;
+
+     if(stat(name,&stbuf) == -1)
+     {
+          fprintf(stderr, "f_siz: can't access %s\n",name);
+          exit(0);
+     }
+     return(stbuf.st_size);
+}
+
+long int filterbank_extract_from_file(float *output, long int tstart, long int tend, long int chanstart, long int chanend, struct filterbank_input *input) {
+	long int i,j;
+	rewind(input->inputfile);
+	fseek(input->inputfile, input->headersize, SEEK_CUR);
+	fseek(input->inputfile, tstart * input->nchans * sizeof(float), SEEK_CUR);
+	fseek(input->inputfile, chanstart * sizeof(float), SEEK_CUR);
+	
+	i=0;
+	j=0;
+	
+	while (i < (tend-tstart) ) {	
+		 fread(output + (chanend - chanstart) * i, sizeof(char), (chanend - chanstart) * sizeof(float), input->inputfile);  
+		 fseek(input->inputfile, (input->nchans - (chanend-chanstart)) * sizeof(float), SEEK_CUR);
+		 i++;
+	}
+	return i;
+}

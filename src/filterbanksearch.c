@@ -58,15 +58,15 @@ Number of IFs                    : 1
 
 int sum_filterbank(struct filterbank_input *input);
 
-double filterbank_chan_freq(struct filterbank_input *input, long int channel);
 
 int main(int argc, char *argv[]) {
 
 	struct filterbank_input sourcea;	
 	struct filterbank_input sourceb;
 	
-
-	
+	FILE *fitsfile;
+	char fitsname[100];
+	float *snap;
 	float *diff_spectrum;
 	if(argc < 2) {
 		exit(1);
@@ -80,10 +80,10 @@ int main(int argc, char *argv[]) {
 	  switch (c)
 		{
 		case 'a':
-		  sourcea.rawdatafile = optarg;
+		  sourcea.filename = optarg;
 		  break;
 		case 'b':
-		  sourceb.rawdatafile = optarg;
+		  sourceb.filename = optarg;
 		  break;
 		case '?':
 		  if (optopt == 'i' || optopt == 'o' || optopt == '1' || optopt == '2' || optopt == '3' || optopt == '4' || optopt == '5' || optopt == '6'|| optopt == '7' || optopt == '8')
@@ -100,14 +100,14 @@ int main(int argc, char *argv[]) {
 		}
 
 	
-	sourcea.inputfile = fopen(sourcea.rawdatafile, "rb");
+	sourcea.inputfile = fopen(sourcea.filename, "rb");
 	read_filterbank_header(&sourcea);
 		    
-    printf("Read and summed %d integrations for sourcea\n", sum_filterbank(&sourcea));
-	sourceb.inputfile = fopen(sourceb.rawdatafile, "rb");
+    fprintf(stderr, "Read and summed %d integrations for sourcea\n", sum_filterbank(&sourcea));
+	sourceb.inputfile = fopen(sourceb.filename, "rb");
 
 	read_filterbank_header(&sourceb);		    
-    printf("Read and summed %d integrations for sourceb\n", sum_filterbank(&sourceb));
+    fprintf(stderr, "Read and summed %d integrations for sourceb\n", sum_filterbank(&sourceb));
 
     diff_spectrum = (float*) malloc(sourcea.nchans * sizeof(float));
 	memset(diff_spectrum, 0x0, sourcea.nchans * sizeof(float));
@@ -116,17 +116,49 @@ int main(int argc, char *argv[]) {
 
 	normalize(diff_spectrum, (long int) sourcea.nchans);
 
+  	snap = (float*) malloc(512 * 164 * sizeof(float));
+	memset(snap, 0x0,512 * 164 * sizeof(float));
 
 
+	fprintf(stderr, "%ld \n", filterbank_extract_from_file(snap, 0, 164, 8050, 8562, &sourcea));
+   
+    long int fitslen;
+	char *fitsdata;
+	
+	fitslen = 2880 + (512 * 164 * 4) + 2880 - ((512 * 164 * 4)%2880);
+	fitsdata = (char *) malloc(fitslen);
 
+    filterbank2fits(fitsdata, snap, 512, 164, 8050, 10.0, 0.0, &sourcea);
+    sprintf(fitsname, "./out.fits");
+    fitsfile = fopen(fitsname, "wb");
+	fwrite(fitsdata, 1, fitslen, fitsfile);
+	fclose(fitsfile);
+
+
+  /* */
+/*
+	for(j=0;j<164;j++){    
+	   for(i = 0; i < 512;i++){
+		   fprintf(stderr, "%f,", snap[i + j*512]);
+	   }
+		 fprintf(stderr, "\n");
+    }	
+    
+    
     for(i=0;i<8;i++) printf("%f, %f, %f\n", sourcea.integrated_spectrum[i], sourceb.integrated_spectrum[i], diff_spectrum[i]); 
-
+*/
 	//fprintf(stderr, "src_raj: %lf src_decj: %lf\n", sourcea.src_raj, sourcea.src_dej);
+	//fprintf(stderr, "headersize: %d nsamples: %ld datasize: %ld\n", sourcea.headersize, sourcea.nsamples, sourcea.datasize);
+
+	
 
 
 return 0;
 
 }
+
+
+
 
 
 int sum_filterbank(struct filterbank_input *input) {
@@ -137,7 +169,7 @@ int sum_filterbank(struct filterbank_input *input) {
     input->temp_spectrum = (float*) malloc(input->nchans * sizeof(float));
 	memset(input->temp_spectrum, 0x0, input->nchans * sizeof(float));
 	j=0;
-    while (fread(input->temp_spectrum, sizeof(float), input->nchans, input->inputfile)) {
+    while (fread(input->temp_spectrum, sizeof(float), input->nchans, input->inputfile) ) {
            for(i=0;i<input->nchans;i++) input->integrated_spectrum[i] =  input->integrated_spectrum[i] + input->temp_spectrum[i];
     	   j++;
     }
