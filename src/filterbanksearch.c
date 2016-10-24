@@ -56,6 +56,8 @@ Number of IFs                    : 1
 
 */
 
+long int candsearch(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input);
+
 int sum_filterbank(struct filterbank_input *input);
 
 
@@ -64,9 +66,7 @@ int main(int argc, char *argv[]) {
 	struct filterbank_input sourcea;	
 	struct filterbank_input sourceb;
 	
-	FILE *fitsfile;
-	char fitsname[100];
-	float *snap;
+
 	float *diff_spectrum;
 	if(argc < 2) {
 		exit(1);
@@ -110,29 +110,19 @@ int main(int argc, char *argv[]) {
     fprintf(stderr, "Read and summed %d integrations for sourceb\n", sum_filterbank(&sourceb));
 
     diff_spectrum = (float*) malloc(sourcea.nchans * sizeof(float));
-	memset(diff_spectrum, 0x0, sourcea.nchans * sizeof(float));
 
+	//memset(diff_spectrum, 0x0, sourcea.nchans * sizeof(float));
+
+
+    long int candwidth;
+    long int hitchan;
+    
+    candwidth = 512;
+    
     for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourcea.integrated_spectrum[i] - sourceb.integrated_spectrum[i])/sourceb.integrated_spectrum[i];
-
 	normalize(diff_spectrum, (long int) sourcea.nchans);
 
-  	snap = (float*) malloc(512 * 164 * sizeof(float));
-	memset(snap, 0x0,512 * 164 * sizeof(float));
-
-
-	fprintf(stderr, "%ld \n", filterbank_extract_from_file(snap, 0, 164, 8050, 8562, &sourcea));
-   
-    long int fitslen;
-	char *fitsdata;
-	
-	fitslen = 2880 + (512 * 164 * 4) + 2880 - ((512 * 164 * 4)%2880);
-	fitsdata = (char *) malloc(fitslen);
-
-    filterbank2fits(fitsdata, snap, 512, 164, 8050, 10.0, 0.0, &sourcea);
-    sprintf(fitsname, "./out.fits");
-    fitsfile = fopen(fitsname, "wb");
-	fwrite(fitsdata, 1, fitslen, fitsfile);
-	fclose(fitsfile);
+	candsearch(diff_spectrum, 512, 10, &sourcea);   
 
 
   /* */
@@ -157,6 +147,62 @@ return 0;
 
 }
 
+
+long int candsearch(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input) {
+
+	long int i, j, k;
+	long int fitslen;
+	char *fitsdata;
+	FILE *fitsfile;
+	char fitsname[100];
+	float *snap;
+	long int startchan;
+	long int endchan;
+	
+
+	fitslen = 2880 + (candwidth * input->nsamples * 4) + 2880 - ((candwidth * input->nsamples * 4)%2880);
+	fitsdata = (char *) malloc(fitslen);
+  	snap = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+
+	for(i=0;i<input->nchans;i++) {
+	
+		if (diff_spectrum[i] > thresh) {
+		
+			startchan = i - candwidth/2;
+			endchan = i + candwidth/2;
+
+			if(endchan > input->nchans) {
+
+				memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
+				fprintf(stderr, "%ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, input->nchans, input));
+	
+			} else if(startchan < 0)    {
+	
+				memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
+				fprintf(stderr, "%ld \n", filterbank_extract_from_file(snap+labs(startchan), 0, input->nsamples, 0, endchan, input));
+
+	
+			} else {
+
+				fprintf(stderr, "%ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, endchan, input));
+
+			}
+			
+			memset(fitsdata, 0x0, fitslen * sizeof(char));
+			filterbank2fits(fitsdata, snap, candwidth, input->nsamples, i, diff_spectrum[i], 0.0, input);
+			sprintf(fitsname, "./%s_%5.5f_%ld.fits", input->source_name, input->tstart, i);
+			fitsfile = fopen(fitsname, "wb");
+			fwrite(fitsdata, 1, fitslen, fitsfile);
+			fclose(fitsfile);
+
+		}
+	
+	}
+	free(fitsdata);
+	free(snap);
+	
+
+}	
 
 
 

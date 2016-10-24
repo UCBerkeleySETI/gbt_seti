@@ -11,7 +11,7 @@
 #include "fitshead.h"
 #include "imswap.h"
 
-void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long int startchan, double snr, double doppler, struct filterbank_input *input);
+void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long int hitchan, double snr, double doppler, struct filterbank_input *input);
 
 double filterbank_chan_freq(struct filterbank_input *input, long int channel);
 

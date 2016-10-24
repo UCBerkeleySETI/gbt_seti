@@ -1,6 +1,6 @@
 #include "filterbankutil.h"
 
-void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long int startchan, double snr, double doppler, struct filterbank_input *input)
+void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long int hitchan, double snr, double doppler, struct filterbank_input *input)
 {
 
 char * buf;
@@ -36,11 +36,11 @@ memset(buf, 0x0, 2880);
 	hputi4(buf, "NAXIS", 2);
 	hputi4(buf, "NAXIS1", nchan);
 	hputi4(buf, "NAXIS2", nsamp);
-	hputnr8(buf, "FCNTR", 12, filterbank_chan_freq(input, startchan) + (input->foff * (((double) nchan)/2)) );
+	hputnr8(buf, "FCNTR", 12, filterbank_chan_freq(input, hitchan) );
 	hputnr8(buf, "DELTAF", 12, (double) input->foff);
 	hputnr8(buf, "DELTAT", 12, (double) input->tsamp);
 
-	hputnr8(buf, "MJD", 12, input->mjdobs);
+	hputnr8(buf, "MJD", 12, input->tstart);
 	hputnr8(buf, "RA", 12, input->src_raj);
 	hputnr8(buf, "DEC", 12, input->src_dej);
 	hputnr8(buf, "DOPPLER", 12, doppler);
