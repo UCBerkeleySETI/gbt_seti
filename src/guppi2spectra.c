@@ -129,7 +129,6 @@ void accumulate_write_single(void *ptr);
 
 double chan_freq(struct gpu_input *firstinput, long long int fftlen, long int coarse_channel, long int fine_channel, long int tdwidth, int ref_frame);
 
-void imswap4 (char *string, int nbytes);
 
 void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channels, double fcntr, double deltaf, double deltat, struct guppi_params *g, struct psrfits *p, double snr, double doppler);
 
@@ -985,14 +984,6 @@ int exists(const char *fname)
     return 0;
 }
 
-int strings_equal (char *string1, char *string2) /* includefile */
-{
-  if (!strcmp(string1,string2)) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
 
 void error_message(char *message) /*includefile */
 {
@@ -1530,34 +1521,6 @@ void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channel
 
 
 
-
-
-
-
-/* IMSWAP4 -- Reverse bytes of Integer*4 or Real*4 vector in place */
-void imswap4 (char *string, int nbytes) 
-{
-
-/* string Address of Integer*4 or Real*4 vector */
-/* bytes Number of bytes to reverse */
-    char *sbyte, *slast;
-    char temp0, temp1, temp2, temp3;
-    slast = string + nbytes;
-    sbyte = string;
-    while (sbyte < slast) {
-        temp3 = sbyte[0];
-        temp2 = sbyte[1];
-        temp1 = sbyte[2];
-        temp0 = sbyte[3];
-        sbyte[0] = temp0;
-        sbyte[1] = temp1;
-        sbyte[2] = temp2;
-        sbyte[3] = temp3;
-        sbyte = sbyte + 4;
-        }
-
-    return;
-}
 
 
 

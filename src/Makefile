@@ -19,7 +19,7 @@ else
         LIBCMD = -dynamiclib
 endif
 
-CFLAGS = -Wno-unused-result -ggdb -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
+CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
 PROGS = test_psrfits_read \
 	raw_quant raw_read massage_vpm \
 	treedop raw_head two2eight filterbanksearch

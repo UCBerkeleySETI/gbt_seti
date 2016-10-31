@@ -4,7 +4,7 @@
 #include <math.h>
 #include <string.h>
 #include "imswap.h"
-
+#include <sys/stat.h>
 
 #pragma once
  

@@ -1,6 +1,7 @@
 /* read_filterbank_header.c - general handling routines for SIGPROC headers */
 /* heisted and mangled from sigproc 4.3 Oct 2016 AS */
 #include "filterbank_header.h"
+#include "filterbankutil.h"
 
 
 
@@ -198,12 +199,15 @@ int read_filterbank_header(struct filterbank_input *input)
   }
 
   input->datasize = sizeof_file(input->filename);
+
   input->headersize = (long int) totalbytes;
+   
+  input->datasize = input->datasize - (long int) input->headersize;
   
-  input->datasize=sizeof_file(input->filename)-input->headersize;
   input->nsamples=(long long) (long double) input->datasize/ (((long double) input->nbits) / 8.0) 
 		 /(long double) input->nifs/(long double) input->nchans;
-  
+  fprintf(stderr,"header: %ld datasize  %ld nchans %ld \n",input->headersize, input->datasize, input->nchans );
+
 
 
 

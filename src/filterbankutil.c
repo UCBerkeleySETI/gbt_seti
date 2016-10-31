@@ -109,7 +109,7 @@ void normalize (float *vec, long int veclen) {
 }
 
 
-long long sizeof_file(char name[]) /* includefile */
+long int sizeof_file(char name[]) /* includefile */
 {
      struct stat stbuf;
 
@@ -118,7 +118,8 @@ long long sizeof_file(char name[]) /* includefile */
           fprintf(stderr, "f_siz: can't access %s\n",name);
           exit(0);
      }
-     return(stbuf.st_size);
+
+     return stbuf.st_size;
 }
 
 long int filterbank_extract_from_file(float *output, long int tstart, long int tend, long int chanstart, long int chanend, struct filterbank_input *input) {
