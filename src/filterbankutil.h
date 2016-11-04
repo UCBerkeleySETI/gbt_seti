@@ -23,4 +23,8 @@ void normalize (float *vec, long int veclen);
 long int sizeof_file(char name[]) ;
 
 long int filterbank_extract_from_file(float *output, long int tstart, long int tend, long int chanstart, long int chanend, struct filterbank_input *input);
+long int candsearch(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input);
+long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input, struct filterbank_input *offsource);
+
+int sum_filterbank(struct filterbank_input *input);
 

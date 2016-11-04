@@ -56,10 +56,7 @@ Number of IFs                    : 1
 
 */
 
-long int candsearch(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input);
-long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input, struct filterbank_input *offsource);
 
-int sum_filterbank(struct filterbank_input *input);
 
 
 int main(int argc, char *argv[]) {
@@ -67,6 +64,8 @@ int main(int argc, char *argv[]) {
 	struct filterbank_input sourcea;	
 	struct filterbank_input sourceb;
 	
+	/* enable doppler search mode */
+	int dopplersearchmode = 0;
 
 	float *diff_spectrum;
 	if(argc < 2) {
@@ -85,6 +84,9 @@ int main(int argc, char *argv[]) {
 		  break;
 		case 'b':
 		  sourceb.filename = optarg;
+		  break;
+		case 'd':
+		  dopplersearchmode = 1;
 		  break;
 		case '?':
 		  if (optopt == 'i' || optopt == 'o' || optopt == '1' || optopt == '2' || optopt == '3' || optopt == '4' || optopt == '5' || optopt == '6'|| optopt == '7' || optopt == '8')
@@ -141,196 +143,106 @@ int main(int argc, char *argv[]) {
 	//fprintf(stderr, "src_raj: %lf src_decj: %lf\n", sourcea.src_raj, sourcea.src_dej);
 	//fprintf(stderr, "headersize: %d nsamples: %ld datasize: %ld\n", sourcea.headersize, sourcea.nsamples, sourcea.datasize);
 
-	
-
 
 return 0;
 
 }
 
 
-long int candsearch(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input) {
 
-	long int i, j, k;
-	long int fitslen;
-	char *fitsdata;
-	FILE *fitsfile;
-	char fitsname[100];
-	float *snap;
-	long int startchan;
-	long int endchan;
-	
-	int goodcandidate = 0;
-	fitslen = 2880 + (candwidth * input->nsamples * 4) + 2880 - ((candwidth * input->nsamples * 4)%2880);
-	fitsdata = (char *) malloc(fitslen);
-  	snap = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+/*  ======================================================================  */
+/*  This is a function to Taylor-tree-sum a data stream. It assumes that    */
+/*  the arrangement of data stream is, all points in first spectra, all     */
+/*  points in second spectra, etc...  Data are summed across time           */
+/*                     Original version: R. Ramachandran, 07-Nov-97, nfra.  */
+/*                     Modified 2011 A. Siemion float/64 bit addressing     */
+/*  outbuf[]       : input array (float), replaced by dedispersed data  */
+/*                   at the output                                          */
+/*  mlen           : dimension of outbuf[] (long int)                            */
+/*  nchn           : number of frequency channels (long int)                     */
+/*                                                                          */
+/*  ======================================================================  */
 
-	for(i=0;i<input->nchans;i++) {
-	
-		if (diff_spectrum[i] > thresh) {
-		    goodcandidate = 1;
-			startchan = i - candwidth/2;
-			endchan = i + candwidth/2;
+void taylor_flt(float outbuf[], long int mlen, long int nchn)
+{
+  float itemp;
+  long int   nsamp,npts,ndat1,nstages,nmem,nmem2,nsec1,nfin, i;
+  long int   istages,isec,ipair,ioff1,i1,i2,koff,ndelay,ndelay2;
+  long int   bitrev(long int, long int);
 
-			
-			if(endchan > input->nchans) {
+  /*  ======================================================================  */
 
-				for (j = startchan; j < input->nchans; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 
-				if(goodcandidate == 1) {
-					 memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
-					 fprintf(stderr, "A %ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, input->nchans, input));
-				}
-
-			} else if(startchan < 0)    {
-				
-				for (j = 0; j < endchan; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 					
-					
-				if(goodcandidate == 1) {
-					 memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
-					 fprintf(stderr, "B %ld \n", filterbank_extract_from_file(snap+labs(startchan), 0, input->nsamples, 0, endchan, input));
-				}
-	
-			} else {
-				for (j = startchan; j < endchan; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 
-				if(goodcandidate == 1) {
-					fprintf(stderr, "C %ld %ld %ld %ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, endchan, input), startchan, endchan, input->nsamples);
-				}
-			}
-			
-			if(goodcandidate == 1) {
-
-				   memset(fitsdata, 0x0, fitslen * sizeof(char));
-				   filterbank2fits(fitsdata, snap, candwidth, input->nsamples, i, diff_spectrum[i], 0.0, input);
-				   sprintf(fitsname, "./%s_%5.5f_%ld.fits", input->source_name, input->tstart, i);
-				   fitsfile = fopen(fitsname, "wb");
-				   fwrite(fitsdata, 1, fitslen, fitsfile);
-				   fclose(fitsfile);
-			}
-		}
-	
-	}
-	free(fitsdata);
-	free(snap);
-	
-}	
+  nsamp   = ((mlen/nchn) - (2*nchn));
+  npts    = (nsamp + nchn);
+  ndat1   = (nsamp + 2 * nchn);
+  
+  //nstages = (int)(log((float)nchn) / 0.6931471 + 0.5);
+  nstages = (long int) log2((double)nchn);
+  nmem    = 1;
 
 
-long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input, struct filterbank_input *offsource) {
+  for (istages=0; istages<nstages; istages++) {
+    nmem  *= 2;
+    nsec1  = (nchn/nmem);
+    nmem2  = (nmem - 2);
 
-	long int i, j, k;
-	long int fitslen;
-	char *fitsdata;
-	FILE *fitsfile;
-	char fitsname[100];
-	float *snap;
-	float *snapoff;
-	
-	long int startchan;
-	long int endchan;
-	
-	int goodcandidate = 0;
-	fitslen = 2880 + (candwidth * input->nsamples * 4) + 2880 - ((candwidth * input->nsamples * 4)%2880);
-	fitsdata = (char *) malloc(fitslen);
-  	snap = (float*) malloc(candwidth * input->nsamples * sizeof(float));
-  	snapoff = (float*) malloc(candwidth * offsource->nsamples * sizeof(float));
+    for (isec=0; isec<nsec1; isec++) {
+      ndelay = -1;
+      koff   = (isec * nmem);
 
-	for(i=0;i<input->nchans;i++) {
-	
-		if (diff_spectrum[i] > thresh) {
-		    goodcandidate = 1;
-			startchan = i - candwidth/2;
-			endchan = i + candwidth/2;
+      for (ipair=0; ipair<(nmem2+1); ipair += 2) {
+        
 
-			
-			if(endchan > input->nchans) {
+        ioff1   = (bitrev(ipair,istages+1)+koff) * ndat1;
+        i2      = (bitrev(ipair+1,istages+1) + koff) * ndat1;
+        ndelay++;
+        ndelay2 = (ndelay + 1);
+        nfin    = (npts + ioff1);
+        for (i1=ioff1; i1<nfin; i1++) {
+          itemp      = (outbuf[i1] + outbuf[i2+ndelay]);
+          outbuf[i2] = (outbuf[i1] + outbuf[i2+ndelay2]);
+          outbuf[i1] = itemp;
+          i2++;
 
-				for (j = startchan; j < input->nchans; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 
-				if(goodcandidate == 1) {
-					 memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
-					 memset(snapoff, 0x0, candwidth * input->nsamples * sizeof(float));
-					 fprintf(stderr, "A %ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, input->nchans, input));
-					 fprintf(stderr, "A %ld \n", filterbank_extract_from_file(snapoff, 0, input->nsamples, startchan, input->nchans, offsource));
-
-				}
-
-			} else if(startchan < 0)    {
-				
-				for (j = 0; j < endchan; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 					
-					
-				if(goodcandidate == 1) {
-					 memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
-					 memset(snapoff, 0x0, candwidth * input->nsamples * sizeof(float));
-
-					 fprintf(stderr, "B %ld \n", filterbank_extract_from_file(snap+labs(startchan), 0, input->nsamples, 0, endchan, input));
-					 fprintf(stderr, "B %ld \n", filterbank_extract_from_file(snapoff+labs(startchan), 0, input->nsamples, 0, endchan, offsource));
-
-				}
-	
-			} else {
-				for (j = startchan; j < endchan; j++) {
-					if (diff_spectrum[j] > diff_spectrum[i]) goodcandidate = 0;
-				} 
-				if(goodcandidate == 1) {
-					fprintf(stderr, "C %ld %ld %ld %ld \n", filterbank_extract_from_file(snap, 0, input->nsamples, startchan, endchan, input), startchan, endchan, input->nsamples);
-					fprintf(stderr, "C %ld %ld %ld %ld \n", filterbank_extract_from_file(snapoff, 0, input->nsamples, startchan, endchan, offsource), startchan, endchan, input->nsamples);
-
-				}
-			}
-			
-			if(goodcandidate == 1) {
-				   //for(j=0;j<(candwidth*input->nsamples);j++) snap[j] = (snap[j] - snapoff[j])/snapoff[j];
-
-				   memset(fitsdata, 0x0, fitslen * sizeof(char));
-				   filterbank2fits(fitsdata, snap, candwidth, input->nsamples, i, diff_spectrum[i], 0.0, input);
-				   sprintf(fitsname, "./%s_%5.5f_%ld.fits", input->source_name, input->tstart, i);
-				   fitsfile = fopen(fitsname, "wb");
-				   fwrite(fitsdata, 1, fitslen, fitsfile);
-				   fclose(fitsfile);
-
-				   memset(fitsdata, 0x0, fitslen * sizeof(char));
-				   filterbank2fits(fitsdata, snapoff, candwidth, input->nsamples, i, diff_spectrum[i], 0.0, input);
-				   sprintf(fitsname, "./%s_%5.5f_%ld_OFF.fits", input->source_name, input->tstart, i);
-				   fitsfile = fopen(fitsname, "wb");
-				   fwrite(fitsdata, 1, fitslen, fitsfile);
-				   fclose(fitsfile);
-
-
-
-			}
-		}
-	
-	}
-	free(fitsdata);
-	free(snap);
-	free(snapoff);
-}	
-
-
-
-
-int sum_filterbank(struct filterbank_input *input) {
-	long int i,j,k;
-    input->integrated_spectrum = (float*) malloc(input->nchans * sizeof(float));
-	memset(input->integrated_spectrum, 0x0, input->nchans * sizeof(float));
-
-    input->temp_spectrum = (float*) malloc(input->nchans * sizeof(float));
-	memset(input->temp_spectrum, 0x0, input->nchans * sizeof(float));
-	j=0;
-    while (fread(input->temp_spectrum, sizeof(float), input->nchans, input->inputfile) ) {
-           for(i=0;i<input->nchans;i++) input->integrated_spectrum[i] =  input->integrated_spectrum[i] + input->temp_spectrum[i];
-    	   j++;
+        }
+      }
     }
-    return j;
+  }
+
+  return;
+}
+
+
+
+/*  ======================================================================  */
+/*  This function bit-reverses the given value "inval" with the number of   */
+/*  bits, "nbits".    ----  R. Ramachandran, 10-Nov-97, nfra.               */
+/*  ======================================================================  */
+
+long int bitrev(long int inval,long int nbits)
+{
+     long int     ifact,k,i,ibitr;
+
+     if(nbits <= 1)
+     {
+          ibitr = inval;
+     }
+     else
+     {
+          ifact = 1;
+          for (i=1; i<(nbits); ++i)
+               ifact  *= 2;
+          k     = inval;
+          ibitr = (1 & k) * ifact;
+
+          for (i=2; i < (nbits+1); i++)
+          {
+               k     /= 2;
+               ifact /= 2;
+               ibitr += (1 & k) * ifact;
+          }
+     }
+     return ibitr;
 }
 
 
