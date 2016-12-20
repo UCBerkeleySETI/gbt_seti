@@ -1,3 +1,5 @@
+#define MAXSIZE 134000000
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -129,7 +131,6 @@ void accumulate_write_single(void *ptr);
 
 double chan_freq(struct gpu_input *firstinput, long long int fftlen, long int coarse_channel, long int fine_channel, long int tdwidth, int ref_frame);
 
-void imswap4 (char *string, int nbytes);
 
 void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channels, double fcntr, double deltaf, double deltat, struct guppi_params *g, struct psrfits *p, double snr, double doppler);
 
@@ -618,6 +619,7 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	gpu_spec[i].bandpass = (float *) malloc (gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectra = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectrum = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
+	
 	if(vflag>=1) fprintf(stderr,"Spectra per channel for this mode: %ld\n", gpu_spec[i].spectraperchannel);        		
     if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
 
@@ -648,7 +650,7 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 cudaThreadSynchronize();
 
 HANDLE_ERROR( cudaMemGetInfo(&worksize, &totalsize));
-if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
+if(vflag>=1) fprintf(stderr,"Done: Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
 
 /* Now let's do the filterbank headers... */
 
@@ -696,15 +698,15 @@ src_dej = strtod(tempbufl, (char **) NULL);
 
 
 
-
+if(vflag>=1) fprintf(stderr,"Writing filterbank headers...\n");
 for(i=0;i<gpu_spec[0].nspec;i++){
 	sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
 	gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");
 
-	foff =  rawinput.pf.hdr.df/gpu_spec[i].cufftN * -1;
+	foff =  fabs(rawinput.pf.hdr.df)/gpu_spec[i].cufftN * -1;
 	nchans = gpu_spec[i].cufftN * rawinput.pf.hdr.nchan;
-	tsamp = gpu_spec[i].cufftN/(rawinput.pf.hdr.df * 1000000) * gpu_spec[i].integrationtime;
-	fch1= rawinput.pf.hdr.fctr + rawinput.pf.hdr.BW/2 + (0.5*foff) + hack;
+	tsamp = gpu_spec[i].cufftN/(fabs(rawinput.pf.hdr.df) * 1000000) * gpu_spec[i].integrationtime;
+	fch1= rawinput.pf.hdr.fctr + fabs(rawinput.pf.hdr.BW)/2 + (0.5*foff) + hack;
 
 	/* dump filterbank header */
 	filterbank_header(gpu_spec[i].filterbank_file);
@@ -985,14 +987,6 @@ int exists(const char *fname)
     return 0;
 }
 
-int strings_equal (char *string1, char *string2) /* includefile */
-{
-  if (!strcmp(string1,string2)) {
-    return 1;
-  } else {
-    return 0;
-  }
-}
 
 void error_message(char *message) /*includefile */
 {
@@ -1217,7 +1211,6 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
 			
 			}
-
 
 			if (gpu_spec[i].spectracnt == 0) HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
 
@@ -1539,34 +1532,6 @@ void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channel
 
 
 
-
-
-
-
-/* IMSWAP4 -- Reverse bytes of Integer*4 or Real*4 vector in place */
-void imswap4 (char *string, int nbytes) 
-{
-
-/* string Address of Integer*4 or Real*4 vector */
-/* bytes Number of bytes to reverse */
-    char *sbyte, *slast;
-    char temp0, temp1, temp2, temp3;
-    slast = string + nbytes;
-    sbyte = string;
-    while (sbyte < slast) {
-        temp3 = sbyte[0];
-        temp2 = sbyte[1];
-        temp1 = sbyte[2];
-        temp0 = sbyte[3];
-        sbyte[0] = temp0;
-        sbyte[1] = temp1;
-        sbyte[2] = temp2;
-        sbyte[3] = temp3;
-        sbyte = sbyte + 4;
-        }
-
-    return;
-}
 
 
 

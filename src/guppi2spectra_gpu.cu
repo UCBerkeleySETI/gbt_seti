@@ -38,7 +38,8 @@ texture<char, cudaTextureType1D, cudaReadModeNormalizedFloat> char_tex;
 
 __global__ void explode8(char *channelbuffer, cufftComplex * voltages, int veclen) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
 
 	 if(tid < veclen) {	 
 		  voltages[tid].x = tex1Dfetch(char_tex, 4*tid); 
@@ -51,7 +52,8 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 __global__ void explode8simple(char *channelbuffer, cufftComplex * voltages, int veclen) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
 
 	 if(tid < veclen) {	 
 		  voltages[tid].x = (float) channelbuffer[4*tid]; 
@@ -64,7 +66,12 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 __global__ void explode8lut(unsigned char *channelbuffer, cufftComplex * voltages, int veclen) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//int tid = threadIdx.x + blockDim.x* threadIdx.y +blockDim.x*blockDim.y*blockIdx.x;
+//int tid = blockIdx.x * blockDim.x * blockDim.y + threadIdx.y * blockDim.x + threadIdx.x;
+
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
 
 	 if(tid < veclen) {	 
 		  voltages[tid].x = gpu_qlut8[channelbuffer[4*tid]]; 
@@ -77,7 +84,8 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 __global__ void explode(unsigned char *channelbuffer, cufftComplex * voltages, int veclen) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
 
 //float lookup[4];
 //lookup[0] = 3.3358750;
@@ -97,8 +105,12 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 __global__ void detect(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
-int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
+
+	int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+
 
 //73 - (73%16) + (73 + 8)%16
 
@@ -110,8 +122,10 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 
 __global__ void detectX(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
-int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
+	
+	int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 
 //73 - (73%16) + (73 + 8)%16
 
@@ -122,7 +136,9 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 }
 __global__ void detectY(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
+
 int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 
 //73 - (73%16) + (73 + 8)%16
@@ -136,7 +152,9 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 
 __global__ void normalize(float * tree_dedopplerd_pntr, int tdwidth)  {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
+	
 
 	 if(tid < tdwidth) { 
 		tree_dedopplerd_pntr[tid] = (tree_dedopplerd_pntr[tid] - meand)/stddevd;     
@@ -146,7 +164,8 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 __global__ void vecdivide(float * spectrumd, float * divisord, int tdwidth)  {
 
-int tid = threadIdx.x + blockIdx.x * blockDim.x;
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
 
 	 if(tid < tdwidth) { 
 		spectrumd[tid] = spectrumd[tid]/divisord[tid];     
@@ -157,35 +176,65 @@ int tid = threadIdx.x + blockIdx.x * blockDim.x;
 
 
 void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen) {
-	explode<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	explode<<<nblocks,nthreads>>>(channelbufferd, voltages, veclen);
 }
 
 void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
-	detect<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	detect<<<nblocks,nthreads>>>(voltages, veclen, fftlen, bandpassd, spectrumd);	
+
 }
 
 void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
-	detectX<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	detectX<<<nblocks,nthreads>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
 }
 
 void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
-	detectY<<<veclen/1024,1024>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	detectY<<<nblocks,nthreads>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
 }
 
 //veclen is number of complex elements, so length of channelbufferd is 4 x veclen
 void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
-	explode8<<<(veclen+1023)/1024,1024>>>(channelbufferd, voltages, veclen);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	explode8<<<nblocks,nthreads>>>(channelbufferd, voltages, veclen);
 }
 
 
 //veclen is number of complex elements, so length of channelbufferd is 2 x veclen
 void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen) {
-	explode8lut<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	explode8lut<<<nblocks,nthreads>>>(channelbufferd, voltages, veclen);
 }
 
 
 void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen) {
-	explode8simple<<<veclen/1024,1024>>>(channelbufferd, voltages, veclen);
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	explode8simple<<<nblocks,nthreads>>>(channelbufferd, voltages, veclen);
 }
 
 void explode8init_wrapper(char *channelbufferd, long int length) {
@@ -214,15 +263,17 @@ void setQuant8(float *lut) {
 }
 
 void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth) {
-	
+	int nthreads = 512;
+	dim3 nblocks((tdwidth+2047)/2048, 4);
 	cudaMemcpyToSymbol("meand", mean, 4, 0, cudaMemcpyHostToDevice);
 	cudaMemcpyToSymbol("stddevd", stddev, 4, 0, cudaMemcpyHostToDevice);
 
-	normalize<<<(tdwidth+511)/512,512>>>(tree_dedopplerd_pntr, tdwidth);
+	normalize<<<nblocks,nthreads>>>(tree_dedopplerd_pntr, tdwidth);
 }
 
 void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth) {
-	
-	vecdivide<<<(tdwidth+511)/512,512>>>(spectrumd, divisord, tdwidth);
+	int nthreads = 512;
+	dim3 nblocks((tdwidth+2047)/2048, 4);
+	vecdivide<<<nblocks,nthreads>>>(spectrumd, divisord, tdwidth);
 }
 

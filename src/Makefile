@@ -19,14 +19,14 @@ else
         LIBCMD = -dynamiclib
 endif
 
-CFLAGS = -ggdb -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
+CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
 PROGS = test_psrfits_read \
-	raw_quant raw_read rawdopplersearch massage_vpm \
-	treedop raw_head two2eight rawfilterbank rawfilterbank_singleband_xy raw_ascii2
+	raw_quant raw_read massage_vpm \
+	treedop raw_head two2eight filterbanksearch
 GPU_PROGS = gpuspec raw2wu test_guppi2spectra
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
-	guppi_params.o guppi_time.o median.o setimysql.o\
-	write_psrfits.o read_psrfits.o misc_utils.o \
+	guppi_params.o guppi_time.o median.o setimysql.o imswap.o\
+	write_psrfits.o read_psrfits.o misc_utils.o read_filterbank_header.o filterbankutil.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
 LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib
 
@@ -114,8 +114,9 @@ slalib-check: slalib
 
 install: install-progs install-libs
 	mkdir -p $(prefix)
-	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' > $(prefix)/listen.sh
-	echo 'export PATH="$${PATH}:$(BINDIR)"'                      >> $(prefix)/listen.sh
+	echo 'test -e $(CUDA)/cuda.sh && source $(CUDA)/cuda.sh'       > $(prefix)/listen.sh
+	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' >> $(prefix)/listen.sh
+	echo 'export PATH="$${PATH}:$(BINDIR)"'                       >> $(prefix)/listen.sh
 
 install-progs: $(PROGS) $(GPU_PROGS)
 	mkdir -p $(BINDIR)
