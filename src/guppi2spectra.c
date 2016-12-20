@@ -17,6 +17,8 @@
 #include "filterbank.h"
 #include "fcntl.h"
 
+#DEFINE MAXSIZE 134000000
+
 static void HandleError( cudaError_t err,
                          const char *file,
                          int line ) {
@@ -283,7 +285,6 @@ long int num_bufs=1;
              inbits = atoi(optarg);
              break;
            case 'p':
-           	 if(i>3){fprintf(stderr, "Error! Up to four kurtosis instances supported.\n"); exit(1);}
            	 for(i=0;i<4;i++){ gpu_spec[i].pol = atoi(optarg); } //0 (X), 1 (Y) or 2 (summed, Stokes-I)
              break;
            case 'g':
@@ -600,6 +601,8 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	gpu_spec[i].cufftbatchSize = (nsamples * nchannels * 2)/gpu_spec[i].cufftN;
 	gpu_spec[i].spectraperchannel = (long int) (nsamples)/gpu_spec[i].cufftN;
 
+
+
 	if( gpu_spec[i].spectraperchannel > gpu_spec[i].integrationtime) {
 		if (gpu_spec[i].spectraperchannel%gpu_spec[i].integrationtime != 0) {
 			fprintf(stderr,"%ld not evenly divisible by %ld!\n", gpu_spec[i].spectraperchannel, gpu_spec[i].integrationtime);        		
@@ -615,13 +618,19 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	gpu_spec[i].bandpass = (float *) malloc (gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectra = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
 	gpu_spec[i].spectrum = (float *) malloc (gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float));
-	if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
 	if(vflag>=1) fprintf(stderr,"Spectra per channel for this mode: %ld\n", gpu_spec[i].spectraperchannel);        		
     if(vflag>=1) fprintf(stderr,"Memory Free: %ld  Total Memory: %ld\n", (long int) (((double) worksize) /  1048576.0), (long int) (((double) totalsize) /  1048576.0) );
 
-	HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
-	HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
-
+	if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
+		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld (SPLIT)\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize/2);
+		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2) );		
+		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2, &worksize) );
+	} else {
+		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
+		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
+		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
+	}
+	
 	if(vflag>=1) fprintf(stderr,"Estimated Size of Work Space: %ld\n", (long int) (((double) worksize) /  1048576.0) );
 	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].bandpassd), gpu_spec[i].cufftN * sizeof(float)) );
 	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].spectrumd), gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
@@ -1198,10 +1207,29 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 	 cudaThreadSynchronize();
 	 for(i=0;i<gpu_spec[0].nspec;i++){
 
-			HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+			if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
+
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), gpu_spec[i].b_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), CUFFT_FORWARD) ); 
+
+			} else {
+
+				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+			
+			}
+
 
 			if (gpu_spec[i].spectracnt == 0) HANDLE_ERROR( cudaMemset(gpu_spec[i].spectrumd, 0x0, gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN * sizeof(float)) );
-			detect_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+
+			if(gpu_spec[i].pol == 2) {
+				detect_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			} else if (gpu_spec[i].pol == 1) {
+					detectY_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			} else if (gpu_spec[i].pol == 0) {
+					detectX_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			}			
+			
+
 			gpu_spec[i].spectracnt++; 
 	   
 			cudaThreadSynchronize();
