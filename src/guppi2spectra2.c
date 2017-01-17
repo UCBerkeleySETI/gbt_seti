@@ -1,4 +1,6 @@
 #define MAXSIZE 134000000
+#define RING_ELEMENTS 8
+
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,6 +8,8 @@
 #include <string.h>
 #include <ctype.h>
 #include <unistd.h>
+#include <semaphore.h>
+
 #include "fitsio.h"
 #include "psrfits.h"
 #include "guppi_params.h"
@@ -48,10 +52,22 @@ struct gpu_input {
 	double baryv;
 	double barya;
 	unsigned int sqlid;
+	int nbits;
+	long int nchannels;
 	long int nsamples;
 	int indxstep;
-	int chanbytes;
+	long long int chanbytes;
 	long int num_bufs;
+	
+	struct hdrinfo * headers[RING_ELEMENTS];
+	unsigned char * data[RING_ELEMENTS];
+	int elements;
+	int in;
+	int out;
+	pthread_mutex_t lock;
+	sem_t countsem, spacesem;	
+	
+	
 
 };
 
@@ -89,7 +105,6 @@ extern void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * vo
 /* 'd' elements are on the GPU (device) */
 
 struct gpu_spectrometer {
-	 unsigned char *channelbuffer;
 	 long int spectracnt;
 	 long int triggerwrite;
 	 cufftComplex *a_d; 
@@ -131,6 +146,7 @@ void accumulate_write(void *ptr);
 
 void accumulate_write_single(void *ptr);
 
+void raw_read_ring(void *ptr);
 
 double chan_freq(struct gpu_input *firstinput, long long int fftlen, long int coarse_channel, long int fine_channel, long int tdwidth, int ref_frame);
 
@@ -167,13 +183,14 @@ int main(int argc, char *argv[]) {
 	char tempbufl[256];
 
 	
+	pthread_t raw_read_th0;
+
 	pthread_t accumwrite_th0;
 	pthread_t accumwrite_th1;
 	pthread_t accumwrite_th2;
 	pthread_t accumwrite_th3;
 	
 
-	unsigned char *channelbuffer=NULL;
 
  	struct gpu_spectrometer gpu_spec[4];
  	
@@ -186,22 +203,16 @@ int main(int argc, char *argv[]) {
 
 	
 	
-	long long int startindx;
-	long long int curindx;
-	long long int chanbytes=0;
+
 	long long int chanbytes_overlap = 0;
 	long long int nsamples = 0;
 	long int hlength=0;
 	double hack = 0;
 	long int nchannels = 0;
 	int inbits = 0;
-	int indxstep = 0;
 	int channel = -1;
     
-
-
     
-	size_t rv=0;
 	long unsigned int by=0;
     
     
@@ -214,7 +225,6 @@ int main(int argc, char *argv[]) {
     
 	rawinput.file_prefix = NULL;
 	rawinput.fil = NULL;
-	rawinput.invalid = 0;
 	rawinput.first_file_skip = 0;
 
 	int filehandle = -1;
@@ -493,11 +503,12 @@ firstinput = rawinput;
 if(vflag>1) fprintf(stderr, "calculating index step\n");
 
 /* number of packets that we *should* increment by */
-indxstep = (int) ((rawinput.pf.sub.bytes_per_subint * (8/rawinput.pf.hdr.nbits)) / rawinput.gf.packetsize) - (int) (rawinput.overlap * rawinput.pf.hdr.nchan * rawinput.pf.hdr.rcvr_polns * 2 / rawinput.gf.packetsize);
-rawinput.indxstep = indxstep;
+rawinput.indxstep = (int) ((rawinput.pf.sub.bytes_per_subint * (8/rawinput.pf.hdr.nbits)) / rawinput.gf.packetsize) - (int) (rawinput.overlap * rawinput.pf.hdr.nchan * rawinput.pf.hdr.rcvr_polns * 2 / rawinput.gf.packetsize);
 rawinput.num_bufs = num_bufs;
 
 nchannels = rawinput.pf.hdr.nchan;
+rawinput.nchannels = nchannels;
+rawinput.nbits = rawinput.pf.hdr.nbits;
 
 overlap = rawinput.overlap;
 
@@ -508,14 +519,13 @@ overlap = rawinput.overlap;
 /* divide by 4 to get back to 2 bits */
 
 
-chanbytes = (indxstep * rawinput.gf.packetsize / ((8/rawinput.pf.hdr.nbits) * rawinput.pf.hdr.nchan)) * num_bufs; 
-rawinput.chanbytes = chanbytes;
+rawinput.chanbytes = (rawinput.indxstep * rawinput.gf.packetsize / ((8/rawinput.pf.hdr.nbits) * rawinput.pf.hdr.nchan)) * num_bufs; 
 
-if(vflag>1) fprintf(stderr, "number of non-overlapping bytes for each chan %lld\n", chanbytes);
+if(vflag>1) fprintf(stderr, "number of non-overlapping bytes for each chan %lld\n", rawinput.chanbytes);
 
 /* for 2 bit data, the number of dual pol samples is the same as the number of bytes */
 
-nsamples = chanbytes / 4 * (8/rawinput.pf.hdr.nbits);
+nsamples = rawinput.chanbytes / 4 * (8/rawinput.pf.hdr.nbits);
 rawinput.nsamples = nsamples;
 
 for(i=0;i<gpu_spec[0].nspec;i++){
@@ -526,13 +536,9 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 }
 
 
-channelbuffer  = (unsigned char *) calloc(chanbytes * nchannels, sizeof(unsigned char) );
-if(vflag>0)printf("malloc'ing %Ld Mbytes for processing all channels/all pols\n",  chanbytes * nchannels);	
 
-long int chanbytes_subint;
-long int chanbytes_subint_total;
-chanbytes_subint = (indxstep * rawinput.gf.packetsize / ((8/rawinput.pf.hdr.nbits) * rawinput.pf.hdr.nchan));
-chanbytes_subint_total = rawinput.pf.sub.bytes_per_subint / rawinput.pf.hdr.nchan;
+
+
 
 
 /* total number of bytes per channel, including overlap */
@@ -540,15 +546,14 @@ chanbytes_overlap = rawinput.pf.sub.bytes_per_subint / rawinput.pf.hdr.nchan;
 if(vflag>0)fprintf(stderr, "total number of bytes per channel, including overlap %lld\n", chanbytes_overlap);
 
 
-if(vflag>0)fprintf(stderr, "Index step: %d\n", indxstep);
+if(vflag>0)fprintf(stderr, "Index step: %d\n", rawinput.indxstep);
 if(vflag>0)fprintf(stderr, "bytes per subint %d\n",rawinput.pf.sub.bytes_per_subint );
 
 
 fflush(stdout);
 
 
-startindx = rawinput.gf.packetindex;
-curindx = startindx;
+
 
 rawinput.curfile = 0;			
 long int subint_cnt = 0;
@@ -569,7 +574,7 @@ HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].a_d), sizeof(cufftComplex)*(nsam
 /* load lookup table into GPU memory */
 
 if (rawinput.pf.hdr.nbits == 2) {
-	if(vflag>0) fprintf(stderr,"Initializing for 2 bits... chanbytes: %lld nchannels: %ld\n", chanbytes, nchannels);
+	if(vflag>0) fprintf(stderr,"Initializing for 2 bits... chanbytes: %lld nchannels: %ld\n", rawinput.chanbytes, nchannels);
 
 	float lookup[4];
 	 lookup[0] = 3.3358750;
@@ -577,10 +582,10 @@ if (rawinput.pf.hdr.nbits == 2) {
 	 lookup[2] = -1.0;
 	 lookup[3] = -3.3358750;
 	setQuant(lookup);
-	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  chanbytes * nchannels) );  	
+	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  rawinput.chanbytes * nchannels) );  	
 
 } else if (rawinput.pf.hdr.nbits == 8) {
-	if(vflag>0) fprintf(stderr,"Initializing for 8 bits... chanbytes: %lld nchannels: %ld\n", chanbytes, nchannels);
+	if(vflag>0) fprintf(stderr,"Initializing for 8 bits... chanbytes: %lld nchannels: %ld\n", rawinput.chanbytes, nchannels);
 
 
 	//HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd8),  chanbytes * nchannels) );  	
@@ -592,7 +597,7 @@ if (rawinput.pf.hdr.nbits == 2) {
 	for(i=0;i<128;i++) lookup[i] = (float) i;
 	for(i=128;i<256;i++) lookup[i] = (float) (i - 256);
 	setQuant8(lookup);
-	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  chanbytes * nchannels) );  	
+	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[0].channelbufferd),  rawinput.chanbytes * nchannels) );  	
 
 }
 
@@ -645,7 +650,6 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	HANDLE_ERROR( cudaMalloc((void **)&(gpu_spec[i].b_d), sizeof(cufftComplex)*(nsamples * nchannels * 2)) ); 
 	HANDLE_ERROR( cudaMemcpy(gpu_spec[i].bandpassd, gpu_spec[i].bandpass, gpu_spec[i].cufftN * sizeof(float), cudaMemcpyHostToDevice) ); 
 
-	gpu_spec[i].channelbuffer = channelbuffer;
 	gpu_spec[i].spectracnt = 0;
 	gpu_spec[i].triggerwrite = 0;
 	
@@ -719,165 +723,31 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 	filterbank_header(gpu_spec[i].filterbank_file);
  }
 
+
+/* open file for header output */
  sprintf(filname, "%s.headers",partfilename);
  rawinput.headerfile = fopen(filname, "wb");
 
 
 
+/* initialize lock and semaphores for ring buffer read thread */
+
+rawinput.elements = RING_ELEMENTS;
+rawinput.in = 0;
+rawinput.out = 0;
+
+ printf("Initialize Count Semaphore: %d \n", sem_init(&(rawinput.countsem), 0, 0));
+ printf("Initialize Space Semaphore: %d \n", sem_init(&(rawinput.spacesem), 0, rawinput.elements));
 
 
-
-do{
-										
-	if(!rawinput.invalid){						  
-		  if(rawinput.fil == NULL) {
-//		  if(filehandle < 0) {
-
-			  /* no file is open for this band, try to open one */
-			  sprintf(filname, "%s.%04d.raw",rawinput.file_prefix,rawinput.curfile);
-			  printf("filename is %s\n",filname);
-			  if(exists(filname)){
-				 printf("opening %s\n",filname);				
-				 rawinput.fil = fopen(filname, "rb");			 
-				 //filehandle = open(filname, O_RDONLY);
-				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) fseek(rawinput.fil, rawinput.first_file_skip, SEEK_CUR);  
-//				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) lseek(filehandle, rawinput.first_file_skip, SEEK_CUR);  
-			  }	else {
-			  	rawinput.invalid = 1;
-		  	  	printf("couldn't open any more files!\n");
-		  	  }
-		  }
-
-	if(rawinput.fil){
-//	if(filehandle > 0){
-
-		if(fread(buf, sizeof(char), 32768, rawinput.fil) == 32768) {
-//		if(read(filehandle, buf, 32768) == 32768) {
-				
-			fseek(rawinput.fil, -32768, SEEK_CUR);
-//			lseek(filehandle, -32768, SEEK_CUR);
-
-			if(vflag>1) fprintf(stderr, "header length: %d\n", gethlength(buf));
-			
-			guppi_read_obs_params(buf, &rawinput.gf, &rawinput.pf);
-
-			if(vflag>1) {
-				 fprintf(stderr, "packetindex %Ld\n", rawinput.gf.packetindex);
-				 fprintf(stderr, "packetsize: %d\n", rawinput.gf.packetsize);
-				 fprintf(stderr, "n_packets %d\n", rawinput.gf.n_packets);
-				 fprintf(stderr, "n_dropped: %d\n",rawinput.gf.n_dropped);
-				 fprintf(stderr, "RA: %f\n",rawinput.pf.sub.ra);
-				 fprintf(stderr, "DEC: %f\n",rawinput.pf.sub.dec);
-				 fprintf(stderr, "subintoffset %f\n", rawinput.pf.sub.offs);
-				 fprintf(stderr, "tsubint %f\n", rawinput.pf.sub.tsubint);
-			}
-					
-				  if(rawinput.gf.packetindex == curindx) {
+pthread_mutex_init(&(rawinput.lock), NULL);
 
 
-					  /* read a subint with correct index, read the data */
-					  if(rawinput.pf.hdr.directio == 0){
-						  hlength = (long int) gethlength(buf);
+pthread_create (&raw_read_th0, NULL, (void *) &raw_read_ring, (void *) &gpu_spec[0]);
 
-						  /* write out header for archiving */
-						  fwrite(buf, sizeof(char), hlength, rawinput.headerfile);
+int threadcheck = 0;
 
-						  fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
-						  rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
- 
-								//lseek(filehandle, gethlength(buf), SEEK_CUR);				
- 								//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-					  } else {
-					  	  hlength = (long int) gethlength(buf);
-					  	  
-					  	  /* write out header for archiving */
-						  fwrite(buf, sizeof(char), hlength, rawinput.headerfile);
-
-					  	  if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
-						  if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
-					  	  fseek(rawinput.fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
-							//lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
-
-						    rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);
-
- 							//rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-
-
-						  fseek(rawinput.fil, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
-						 //lseek(filehandle, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
-
-					  }
-					  
-					  if((long int)rv == rawinput.pf.sub.bytes_per_subint){
-						 if(vflag>1) fprintf(stderr,"read %d bytes from %ld in curfile %d\n", rawinput.pf.sub.bytes_per_subint, j, rawinput.curfile);
-						  
-						 /* need to have each channel be contiguous */
-						 /* copy in to buffer by an amount offset by the total channel offset + the offset within that channel */
-						 /* need to make sure we only grab the non-overlapping piece */
-						 for(i = 0; i < rawinput.pf.hdr.nchan; i++) {
-							 memcpy(channelbuffer + (i * chanbytes) + (subint_cnt * chanbytes_subint), rawinput.pf.sub.data + (i * chanbytes_subint_total), chanbytes_subint);												
-						 }
-						 //memcpy(channelbuffer + (subint_cnt * rawinput.pf.sub.bytes_per_subint), rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-						 subint_cnt++;
-			  
-			  
-						 if(vflag>=1) fprintf(stderr, "copied %lld bytes subint cnt %ld\n", chanbytes * rawinput.pf.hdr.nchan, subint_cnt);
-			  
-			
-					   } else {
-						   rawinput.fil = NULL;
-						   rawinput.invalid = 1;
-						   fprintf(stderr,"ERR: couldn't read as much as the header said we could... assuming corruption and exiting...\n");
-						   exit(1);
-					   }
-				   
-			  
-				   } else if(rawinput.gf.packetindex > curindx) {
-						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
-						/* read a subint with too high an indx, must have dropped a whole subintegration*/
-						/* don't read the subint, but increment the subint counter and allow old data to be rechannelized */
-						/* so that we maintain continuity in time... */
-						subint_cnt++;
-						//curindx = curindx + indxstep;
-					   /* We'll get the current valid subintegration again during the next time through this loop */
-
-			  
-				   } else if(rawinput.gf.packetindex < curindx) {
-						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, rawinput.gf.packetindex );
-						/* somehow we were expecting a higher packet index than we got !?!? */
-
-						/* we'll read past this subint and try again next time through */
-
-						 if(rawinput.pf.hdr.directio == 0){
-							 fseek(rawinput.fil, gethlength(buf), SEEK_CUR);
-							 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);		 
- 
-								   //lseek(filehandle, gethlength(buf), SEEK_CUR);				
-								   //rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-						 } else {
-							 hlength = (long int) gethlength(buf);
-							 if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
-							 if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
-							 fseek(rawinput.fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
-							  //lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
-
-							 rv=fread(rawinput.pf.sub.data, sizeof(char), rawinput.pf.sub.bytes_per_subint, rawinput.fil);
-
-							   //rv = read(filehandle, rawinput.pf.sub.data, rawinput.pf.sub.bytes_per_subint);
-
-							 fseek(rawinput.fil, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
-							  //lseek(filehandle, ( (512 - (rawinput.pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
-
-						 }
-						 
-						 curindx = curindx - indxstep;
-
-				   }
-
-
-				   if(subint_cnt == num_bufs) {
-						if(vflag>1) fprintf(stderr, "calling gpu_channelize...");						 	
-						subint_cnt=0;
+while(1) {
 						gpu_channelize(gpu_spec, nchannels, nsamples);
 						if(vflag>1) fprintf(stderr, "waiting for accumulate...");						 	
 
@@ -886,9 +756,8 @@ do{
 						  pthread_join(accumwrite_th2, NULL);
 						  pthread_join(accumwrite_th3, NULL);
 
-	 //								 pthread_join(accumwrite_th0, NULL);
   
-		   /* now copy spectra to spectrum */
+		   // now copy spectra to spectrum 
 		 
 						 for (i=0;i<gpu_spec[0].nspec;i++)	{
 							 if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
@@ -896,7 +765,7 @@ do{
 								 gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
 								 gpu_spec[i].spectracnt = 0;
 
-								 /* launch accumulate / disk write thread */								 
+								 // launch accumulate / disk write thread 							 
 
 								if (i == 3) {
 								   pthread_create (&accumwrite_th3, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[3]);
@@ -911,29 +780,22 @@ do{
 							 }
 						 }
 
-	 //								 pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write, (void *) &gpu_spec);												  									 				 
-				   }
+						if(pthread_kill(raw_read_th0, 0) != 0)
+						{
+							sem_getvalue(&(rawinput.countsem), &threadcheck);
+							printf("got: %d \n", threadcheck);
+							if(threadcheck == 0) exit(0);
+						}
 
-
-			   } else {
-
-			   /* file open but couldn't read 32KB */
-				  fclose(rawinput.fil);
-				  rawinput.fil = NULL;
-				  //close(filehandle);
-				  //filehandle=-1;
-				  rawinput.curfile++;						
-			   }
-		}			 	 	 
-	}
-
-										
-	if(rawinput.fil != NULL) curindx = curindx + indxstep;
-//	if(filehandle > 0) curindx = curindx + indxstep;
-
-
-} while(!(rawinput.invalid));
 	
+}
+
+
+
+
+
+
+
 	
 	
 	fprintf(stderr, "finishing up...\n");
@@ -966,7 +828,6 @@ printf("start time %15.15Lg end time %15.15Lg %s %s barycentric velocity %15.15g
 //	fclose(outputfile);
 
 
-	free(gpu_spec[0].channelbuffer);
 
 	for(i=0;i<gpu_spec[0].nspec;i++){
 		free(gpu_spec[i].spectrum);
@@ -1006,9 +867,7 @@ void error_message(char *message) /*includefile */
 
 
 void print_usage(char *argv[]) {
-	fprintf(stderr, "USAGE: %s -i input_prefix -c channel -p N\n", argv[0]);
-	fprintf(stderr, "		N = 2^N FFT Points\n");
-	fprintf(stderr, "		-v or -V for verbose\n");
+	fprintf(stderr, "Someone should really add this...\n", argv[0]);
 }
 
 
@@ -1177,7 +1036,7 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 /* chan 0, pol 0, r, pol 0 i, pol 1 ... */
 
 	  i=0;
-	 if(vflag>1) fprintf(stderr, "center_freq: %f\n\n", gpu_spec[i].rawinput->pf.hdr.fctr);
+	 //if(vflag>1) fprintf(stderr, "center_freq: %f\n\n", gpu_spec[i].rawinput->pf.hdr.fctr);
 	 nframes = nsamples / gpu_spec[i].cufftN;
 
 	 if(vflag>1) fprintf(stderr, "%ld\n", (size_t) nsamples * nchannels);
@@ -1185,19 +1044,44 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 	 /* copy whole subint onto gpu */
 
-	 /* explode to a floating point array twice the length of nsamples, one for each polarization */
-	 if(gpu_spec[i].rawinput->pf.hdr.nbits == 2) {
-	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels, cudaMemcpyHostToDevice) ); 
-		 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels);
-	 } else if (gpu_spec[i].rawinput->pf.hdr.nbits == 8) {
-	 	 //HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd8, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
-		 //explode8simple_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
-		 //explode8_wrapper(gpu_spec[i].channelbufferd8, gpu_spec[i].a_d, nsamples * nchannels); 
+     sem_wait(&(gpu_spec[i].rawinput->countsem));
 
-	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].channelbuffer, (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
+     pthread_mutex_lock(&(gpu_spec[i].rawinput->lock));
+     //printf("Popped: %f", inputtest.b[(inputtest.out++) & (inputtest.N-1)]);
+
+
+
+	 if(gpu_spec[i].rawinput->nbits == 2) {
+		 
+		 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].rawinput->data[(gpu_spec[0].rawinput->out++) & (gpu_spec[0].rawinput->elements - 1)], (size_t) nsamples * nchannels, cudaMemcpyHostToDevice) ); 
+
+	 } else if (gpu_spec[i].rawinput->nbits == 8) {
+
+	 	 HANDLE_ERROR( cudaMemcpy( gpu_spec[i].channelbufferd, gpu_spec[0].rawinput->data[(gpu_spec[0].rawinput->out++) & (gpu_spec[0].rawinput->elements - 1)], (size_t) nsamples * nchannels * 4, cudaMemcpyHostToDevice) ); 
+
+	 }	
+
+     pthread_mutex_unlock(&(gpu_spec[i].rawinput->lock));
+
+     // Increment the count of the number of spaces
+     sem_post(&(gpu_spec[i].rawinput->spacesem));
+
+
+	 /* explode to a floating point array twice the length of nsamples, one for each polarization */
+
+	 if(gpu_spec[i].rawinput->nbits == 2) {
+		 
+		 explode_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels);
+
+	 } else if (gpu_spec[i].rawinput->nbits == 8) {
+
 		 explode8lut_wrapper(gpu_spec[i].channelbufferd, gpu_spec[i].a_d, nsamples * nchannels); 
 
 	 }	
+
+
+
+
 
 //	 cufftComplex tempcmplx[2048];
 //	HANDLE_ERROR( cudaMemcpy(tempcmplx, gpu_spec[i].a_d, 2048 * sizeof(cufftComplex), cudaMemcpyDeviceToHost) );
@@ -1238,66 +1122,6 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 			}
 			if(vflag>1) fprintf(stderr, "\n\n%f %f\n\n", gpu_spec[i].spectra[100], gpu_spec[i].spectra[1]);
 	}
-
-/*
-for (i=0;i<gpu_spec[0].nspec;i++)	{
-	 if (gpu_spec[i].spectraperchannel >= gpu_spec[i].integrationtime) {								 									 
-
-		  memcpy(gpu_spec[i].spectrum, gpu_spec[i].spectra, nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN * sizeof(float));																						  
-
-	 } else {
-
-		 for(j = 0; j < (nchannels * gpu_spec[i].spectraperchannel * gpu_spec[i].cufftN); j++) {
-			  gpu_spec[i].spectrum[j] = gpu_spec[i].spectrum[j] + gpu_spec[i].spectra[j]; 						
-		 }	
-		 
-	}
-	if ((gpu_spec[i].spectraperchannel * gpu_spec[i].spectracnt) >= gpu_spec[i].integrationtime) {
-		gpu_spec[i].triggerwrite = gpu_spec[i].spectracnt;
-		gpu_spec[i].spectracnt = 0;
-	}
-}
-*/	
-	
-	
-	//	exit(0);
-	   	   
-	   //for(k = 0; k < nframes; k++) {
-		//	for(j = 0; j < gpu_spec->cufftN; j++) {
-		//		stitched_spectrum[ (gpu_spec->cufftN * i) + j ] = stitched_spectrum[ (gpu_spec->cufftN * i) + j ] + gpu_spec->spectra[(k * gpu_spec->cufftN) + ( (j+gpu_spec->cufftN/2)%gpu_spec->cufftN )];				 
-		//	}
-	   //}
-	  // set the DC channel equal to the mean of the two adjacent channels
-	   //stitched_spectrum[ (gpu_spec->cufftN/2) + (i * gpu_spec->cufftN) ] = (stitched_spectrum[ (gpu_spec->cufftN/2) + (i * gpu_spec->cufftN) - 1 ] + stitched_spectrum[ (gpu_spec->cufftN/2) + (i * gpu_spec->cufftN) + 1])/2;
-
-//meta information:
-//RA (double), DEC (double), MJD (double), Center frequency (double)
-
-//for(i=0;i<chanbytes * nchans;i++) {
-//fprintf(outputfile, "%f\n", gpu_spec->spectra[i]);
-//}
-
-/*
-sprintf(tempfilname, "%s/%s.%f.fits",gpu_spec->scratchpath, gpu_spec->rawinput->pf.hdr.source, gpu_spec->rawinput->pf.hdr.fctr);
-outputfile = fopen(tempfilname, "a+");
-
-fitsdata = malloc((chanbytes * nchans * sizeof(float)) + 2880 * 2);
-
-if(gpu_spec->channelbuffer_pos == 0) {
-	 gpu_spec->rawinput->pf.sub.offs = (double) nchans / (double) (gpu_spec->rawinput->pf.hdr.BW * 1000000) * (double) chanbytes * (double) (gpu_spec->channelbuffer_pos + 0.5);
-	 fitslen = simple_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN, 0.0, 0.0, gpu_spec->rawinput);
-} else {
- 	 gpu_spec->rawinput->pf.sub.offs = (double) nchans / (double) (gpu_spec->rawinput->pf.hdr.BW * 1000000) * (double) chanbytes * (double) (gpu_spec->channelbuffer_pos);
-	 fitslen = extension_fits_buf(fitsdata, (float *) gpu_spec->spectra, 1, nchans*chanbytes, gpu_spec->rawinput->pf.hdr.fctr, (long int) gpu_spec->cufftN, 0.0, 0.0, gpu_spec->rawinput);
-}
-
-fwrite(fitsdata, sizeof(char), fitslen, outputfile);
-fflush(outputfile);
-fclose(outputfile);
-free(fitsdata);
-*/
-//fwrite(gpu_spec->spectra, sizeof(char), chanbytes * nchans * sizeof(float), outputfile);
-
 
 
 }
@@ -1806,4 +1630,246 @@ int little_endian() /*includefile*/
 }
 
 
+
+void raw_read_ring(void *ptr){
+
+
+struct gpu_spectrometer *gpu_spec;
+gpu_spec = (struct gpu_spectrometer *) ptr;
+
+long int i,j,k;	 
+	 
+long int chanbytes_subint;
+long int chanbytes_subint_total;
+long int subint_cnt = 0;
+long long int curindx;
+long long int startindx;
+
+int segment;
+
+char filname[250];
+char buf[32768];
+long int hlength=0;
+
+size_t rv=0;
+unsigned char *channelbuffer=NULL;
+
+
+channelbuffer  = (unsigned char *) calloc(gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan, sizeof(unsigned char) );
+if(vflag>0)printf("malloc'ing %Ld Mbytes for processing all channels/all pols\n",  gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan);	
+
+
+chanbytes_subint = (gpu_spec->rawinput->indxstep * gpu_spec->rawinput->gf.packetsize / ((8/gpu_spec->rawinput->pf.hdr.nbits) * gpu_spec->rawinput->pf.hdr.nchan));
+chanbytes_subint_total = gpu_spec->rawinput->pf.sub.bytes_per_subint / gpu_spec->rawinput->pf.hdr.nchan;
+
+/* all allocations in main() */
+//channelbuffer  = (unsigned char *) calloc(gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan, sizeof(unsigned char) );
+
+for(i = 0; i < gpu_spec->rawinput->elements; i++) {
+	gpu_spec->rawinput->data[i] = (unsigned char *) calloc(gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan, sizeof(unsigned char) );	
+	gpu_spec->rawinput->headers[i] = malloc(sizeof(struct hdrinfo));
+}
+
+startindx = gpu_spec->rawinput->gf.packetindex;
+curindx = startindx;
+
+//nchannels = gpu_spec->rawinput->pf.hdr.nchan;
+//gpu_spec->triggerwrite
+
+
+
+/*initialize to zero */
+
+gpu_spec->rawinput->invalid = 0;
+
+do{
+							
+										
+	if(!gpu_spec->rawinput->invalid){						  
+		  if(gpu_spec->rawinput->fil == NULL) {
+
+			  /* no file is open for this band, try to open one */
+			  sprintf(filname, "%s.%04d.raw",gpu_spec->rawinput->file_prefix,gpu_spec->rawinput->curfile);
+			  printf("filename is %s\n",filname);
+			  if(exists(filname)){
+				 printf("opening %s\n",filname);				
+				 gpu_spec->rawinput->fil = fopen(filname, "rb");			 
+
+				 if(gpu_spec->rawinput->curfile == 0 && gpu_spec->rawinput->first_file_skip != 0) fseek(gpu_spec->rawinput->fil, gpu_spec->rawinput->first_file_skip, SEEK_CUR);  
+
+			  }	else {
+			  	gpu_spec->rawinput->invalid = 1;
+		  	  	printf("couldn't open any more files!\n");
+		  	  }
+		  }
+
+	if(gpu_spec->rawinput->fil){
+
+		if(fread(buf, sizeof(char), 32768, gpu_spec->rawinput->fil) == 32768) {
+				
+			fseek(gpu_spec->rawinput->fil, -32768, SEEK_CUR);
+
+			if(vflag>1) fprintf(stderr, "header length: %d\n", gethlength(buf));
+			
+			guppi_read_obs_params(buf, &gpu_spec->rawinput->gf, &gpu_spec->rawinput->pf);
+
+			if(vflag>1) {
+				 fprintf(stderr, "packetindex %Ld\n", gpu_spec->rawinput->gf.packetindex);
+				 fprintf(stderr, "packetsize: %d\n", gpu_spec->rawinput->gf.packetsize);
+				 fprintf(stderr, "n_packets %d\n", gpu_spec->rawinput->gf.n_packets);
+				 fprintf(stderr, "n_dropped: %d\n",gpu_spec->rawinput->gf.n_dropped);
+				 fprintf(stderr, "RA: %f\n",gpu_spec->rawinput->pf.sub.ra);
+				 fprintf(stderr, "DEC: %f\n",gpu_spec->rawinput->pf.sub.dec);
+				 fprintf(stderr, "subintoffset %f\n", gpu_spec->rawinput->pf.sub.offs);
+				 fprintf(stderr, "tsubint %f\n", gpu_spec->rawinput->pf.sub.tsubint);
+			}
+					
+				  if(gpu_spec->rawinput->gf.packetindex == curindx) {
+
+					  /* read a subint with correct index, read the data */
+					  if(gpu_spec->rawinput->pf.hdr.directio == 0){
+						  hlength = (long int) gethlength(buf);
+
+						  /* write out header for archiving */
+						  fwrite(buf, sizeof(char), hlength, gpu_spec->rawinput->headerfile);
+
+						  fseek(gpu_spec->rawinput->fil, gethlength(buf), SEEK_CUR);
+						  rv=fread(gpu_spec->rawinput->pf.sub.data, sizeof(char), gpu_spec->rawinput->pf.sub.bytes_per_subint, gpu_spec->rawinput->fil);		 
+ 
+								//lseek(filehandle, gethlength(buf), SEEK_CUR);				
+ 								//rv = read(filehandle, gpu_spec->rawinput->pf.sub.data, gpu_spec->rawinput->pf.sub.bytes_per_subint);
+					  } else {
+					  	  hlength = (long int) gethlength(buf);
+					  	  
+					  	  /* write out header for archiving */
+						  fwrite(buf, sizeof(char), hlength, gpu_spec->rawinput->headerfile);
+
+					  	  if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
+						  if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
+					  	  fseek(gpu_spec->rawinput->fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
+							//lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
+
+						    rv=fread(gpu_spec->rawinput->pf.sub.data, sizeof(char), gpu_spec->rawinput->pf.sub.bytes_per_subint, gpu_spec->rawinput->fil);
+
+ 							//rv = read(filehandle, gpu_spec->rawinput->pf.sub.data, gpu_spec->rawinput->pf.sub.bytes_per_subint);
+
+						  fseek(gpu_spec->rawinput->fil, ( (512 - (gpu_spec->rawinput->pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
+						 //lseek(filehandle, ( (512 - (gpu_spec->rawinput->pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
+
+					  }
+					  
+					  if((long int)rv == gpu_spec->rawinput->pf.sub.bytes_per_subint){
+						 if(vflag>1) fprintf(stderr,"read %d bytes from %ld in curfile %d\n", gpu_spec->rawinput->pf.sub.bytes_per_subint, j, gpu_spec->rawinput->curfile);
+						  
+						 /* need to have each channel be contiguous */
+						 /* copy in to buffer by an amount offset by the total channel offset + the offset within that channel */
+						 /* need to make sure we only grab the non-overlapping piece */
+						 for(i = 0; i < gpu_spec->rawinput->pf.hdr.nchan; i++) {
+							 memcpy(channelbuffer + (i * gpu_spec->rawinput->chanbytes) + (subint_cnt * chanbytes_subint), gpu_spec->rawinput->pf.sub.data + (i * chanbytes_subint_total), chanbytes_subint);												
+						 }
+						 //memcpy(channelbuffer + (subint_cnt * gpu_spec->rawinput->pf.sub.bytes_per_subint), gpu_spec->rawinput->pf.sub.data, gpu_spec->rawinput->pf.sub.bytes_per_subint);
+						 subint_cnt++;
+			  
+			  
+						 if(vflag>=1) fprintf(stderr, "copied %lld bytes subint cnt %ld\n", gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan, subint_cnt);
+			  
+			
+					   } else {
+						   gpu_spec->rawinput->fil = NULL;
+						   gpu_spec->rawinput->invalid = 1;
+						   fprintf(stderr,"ERR: couldn't read as much as the header said we could... assuming corruption and exiting...\n");
+						   exit(1);
+					   }
+				   
+			  
+				   } else if(gpu_spec->rawinput->gf.packetindex > curindx) {
+						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, gpu_spec->rawinput->gf.packetindex );
+						/* read a subint with too high an indx, must have dropped a whole subintegration*/
+						/* don't read the subint, but increment the subint counter and allow old data to be rechannelized */
+						/* so that we maintain continuity in time... */
+						subint_cnt++;
+						//curindx = curindx + indxstep;
+					   /* We'll get the current valid subintegration again during the next time through this loop */
+
+			  
+				   } else if(gpu_spec->rawinput->gf.packetindex < curindx) {
+						fprintf(stderr,"ERR: curindx: %Ld, pktindx: %Ld\n", curindx, gpu_spec->rawinput->gf.packetindex );
+						/* somehow we were expecting a higher packet index than we got !?!? */
+
+						/* we'll read past this subint and try again next time through */
+
+						 if(gpu_spec->rawinput->pf.hdr.directio == 0){
+							 fseek(gpu_spec->rawinput->fil, gethlength(buf), SEEK_CUR);
+							 rv=fread(gpu_spec->rawinput->pf.sub.data, sizeof(char), gpu_spec->rawinput->pf.sub.bytes_per_subint, gpu_spec->rawinput->fil);		 
+ 
+								   //lseek(filehandle, gethlength(buf), SEEK_CUR);				
+								   //rv = read(filehandle, gpu_spec->rawinput->pf.sub.data, gpu_spec->rawinput->pf.sub.bytes_per_subint);
+						 } else {
+							 hlength = (long int) gethlength(buf);
+							 if(vflag>1) fprintf(stderr, "header length: %ld\n", hlength);
+							 if(vflag>1) fprintf(stderr, "seeking: %ld\n", hlength + ((512 - (hlength%512))%512) );
+							 fseek(gpu_spec->rawinput->fil, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);
+							  //lseek(filehandle, (hlength + ((512 - (hlength%512))%512) ), SEEK_CUR);				
+
+							 rv=fread(gpu_spec->rawinput->pf.sub.data, sizeof(char), gpu_spec->rawinput->pf.sub.bytes_per_subint, gpu_spec->rawinput->fil);
+
+							   //rv = read(filehandle, gpu_spec->rawinput->pf.sub.data, gpu_spec->rawinput->pf.sub.bytes_per_subint);
+
+							 fseek(gpu_spec->rawinput->fil, ( (512 - (gpu_spec->rawinput->pf.sub.bytes_per_subint%512))%512), SEEK_CUR);
+							  //lseek(filehandle, ( (512 - (gpu_spec->rawinput->pf.sub.bytes_per_subint%512))%512), SEEK_CUR);				
+
+						 }
+						 
+						 curindx = curindx - gpu_spec->rawinput->indxstep ;
+
+				   }
+
+				   if(subint_cnt == gpu_spec->rawinput->num_bufs) {
+				   			subint_cnt=0;
+				   			
+							// wait if there is no space left:
+							sem_wait( &(gpu_spec->rawinput->spacesem));
+							
+							//lock the mutex
+							pthread_mutex_lock(&(gpu_spec->rawinput->lock));
+							
+							segment = (gpu_spec->rawinput->in++) & (gpu_spec->rawinput->elements - 1);
+							memcpy(gpu_spec->rawinput->data[segment], channelbuffer, (size_t) gpu_spec->rawinput->nsamples * gpu_spec->rawinput->pf.hdr.nchan * 4);
+							memcpy(gpu_spec->rawinput->headers[segment], &(gpu_spec->rawinput->pf.hdr), sizeof(struct hdrinfo));
+							
+							//printf("Index: %d\n",segment);
+
+						    // Unlock the mutex
+							pthread_mutex_unlock(&(gpu_spec->rawinput->lock));
+
+							// increment the count of the number of items
+							sem_post(&(gpu_spec->rawinput->countsem));
+				   }
+
+
+
+
+			   } else {
+
+			   /* file open but couldn't read 32KB */
+				  fclose(gpu_spec->rawinput->fil);
+				  gpu_spec->rawinput->fil = NULL;
+				  //close(filehandle);
+				  //filehandle=-1;
+				  gpu_spec->rawinput->curfile++;						
+			   }
+		}			 	 	 
+	}
+
+										
+	if(gpu_spec->rawinput->fil != NULL) curindx = curindx + gpu_spec->rawinput->indxstep ;
+//	if(filehandle > 0) curindx = curindx + indxstep;
+
+
+} while(!(gpu_spec->rawinput->invalid));
+
+free(channelbuffer);
+
+
+}
 
