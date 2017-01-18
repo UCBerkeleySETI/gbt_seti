@@ -745,9 +745,9 @@ pthread_mutex_init(&(rawinput.lock), NULL);
 
 pthread_create (&raw_read_th0, NULL, (void *) &raw_read_ring, (void *) &gpu_spec[0]);
 
-int threadcheck = 0;
+int threadcheck = 8;
 
-while(1) {
+while(threadcheck != 0) {
 						gpu_channelize(gpu_spec, nchannels, nsamples);
 						if(vflag>1) fprintf(stderr, "waiting for accumulate...");						 	
 
@@ -784,7 +784,6 @@ while(1) {
 						{
 							sem_getvalue(&(rawinput.countsem), &threadcheck);
 							printf("got: %d \n", threadcheck);
-							if(threadcheck == 0) exit(0);
 						}
 
 	
