@@ -1,6 +1,6 @@
 #define MAXSIZE 134000000
 #define RING_ELEMENTS 8
-
+#define SPINFILE "/home/obs/triggers/gpuspec_spin"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -64,8 +64,10 @@ struct gpu_input {
 	int elements;
 	int in;
 	int out;
-	pthread_mutex_t lock;
+	int doneflag;
+	pthread_mutex_t lock, donelock;
 	sem_t countsem, spacesem;	
+	int spin;
 	
 	
 
@@ -227,6 +229,9 @@ int main(int argc, char *argv[]) {
 	rawinput.fil = NULL;
 	rawinput.first_file_skip = 0;
 
+	rawinput.spin = 0;
+
+
 	int filehandle = -1;
 	
 	char *pntr;
@@ -254,7 +259,7 @@ int main(int argc, char *argv[]) {
 long int num_bufs=1;
        opterr = 0;
      
-       while ((c = getopt (argc, argv, "Vvdi:o:c:h:f:t:k:b:p:g:B:")) != -1)
+       while ((c = getopt (argc, argv, "Vvdsi:o:c:h:f:t:k:b:p:g:B:")) != -1)
          switch (c)
            {
            case 'v':
@@ -318,6 +323,9 @@ long int num_bufs=1;
            case 'o':
 			 partfilename = optarg;
              break;
+           case 's':
+			 rawinput.spin = 1;
+             break; 
            case '?':
              if (optopt == 'i' || optopt == 'o' || optopt == '1' || optopt == '2' || optopt == '3' || optopt == '4' || optopt == '5' || optopt == '6'|| optopt == '7' || optopt == '8')
                fprintf (stderr, "Option -%c requires an argument.\n", optopt);
@@ -735,20 +743,31 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 rawinput.elements = RING_ELEMENTS;
 rawinput.in = 0;
 rawinput.out = 0;
-
- printf("Initialize Count Semaphore: %d \n", sem_init(&(rawinput.countsem), 0, 0));
- printf("Initialize Space Semaphore: %d \n", sem_init(&(rawinput.spacesem), 0, rawinput.elements));
+rawinput.doneflag = 0;
+ fprintf(stderr, "Initialize Count Semaphore: %d \n", sem_init(&(rawinput.countsem), 0, 0));
+ fprintf(stderr, "Initialize Space Semaphore: %d \n", sem_init(&(rawinput.spacesem), 0, rawinput.elements));
 
 
 pthread_mutex_init(&(rawinput.lock), NULL);
+pthread_mutex_init(&(rawinput.donelock), NULL);
 
 
 pthread_create (&raw_read_th0, NULL, (void *) &raw_read_ring, (void *) &gpu_spec[0]);
 
 int threadcheck = 8;
-
-while(threadcheck != 0) {
+int flag=0;
+while(1) {
 						gpu_channelize(gpu_spec, nchannels, nsamples);
+
+
+						pthread_mutex_lock(&(rawinput.donelock));
+						   sem_getvalue(&(rawinput.countsem), &threadcheck);
+						   flag = rawinput.doneflag;
+						pthread_mutex_unlock(&(rawinput.donelock));
+						
+						if(flag == 1 && threadcheck == 0) break;
+
+
 						if(vflag>1) fprintf(stderr, "waiting for accumulate...");						 	
 
 						  pthread_join(accumwrite_th0, NULL);
@@ -779,13 +798,13 @@ while(threadcheck != 0) {
 
 							 }
 						 }
-
+/*
 						if(pthread_kill(raw_read_th0, 0) != 0)
 						{
 							sem_getvalue(&(rawinput.countsem), &threadcheck);
-							printf("got: %d \n", threadcheck);
+							fprintf(stderr, "got: %d \n", threadcheck);
 						}
-
+*/
 	
 }
 
@@ -866,7 +885,7 @@ void error_message(char *message) /*includefile */
 
 
 void print_usage(char *argv[]) {
-	fprintf(stderr, "Someone should really add this...\n", argv[0]);
+	fprintf(stderr, "%s: Someone should really add this...\n", argv[0]);
 }
 
 
@@ -1031,7 +1050,8 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 	 long int i,j,k;
 	 long int nframes;
-
+	 int threadcheck = 8;
+	 int flag = 0;
 /* chan 0, pol 0, r, pol 0 i, pol 1 ... */
 
 	  i=0;
@@ -1045,10 +1065,16 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
      sem_wait(&(gpu_spec[i].rawinput->countsem));
 
+	 pthread_mutex_lock(&(gpu_spec[i].rawinput->donelock));
+		sem_getvalue(&(gpu_spec[i].rawinput->countsem), &threadcheck);
+		flag = gpu_spec[i].rawinput->doneflag;
+	 pthread_mutex_unlock(&(gpu_spec[i].rawinput->donelock));
+
+	 if(flag == 1 && threadcheck == 0) return;
+
+
      pthread_mutex_lock(&(gpu_spec[i].rawinput->lock));
      //printf("Popped: %f", inputtest.b[(inputtest.out++) & (inputtest.N-1)]);
-
-
 
 	 if(gpu_spec[i].rawinput->nbits == 2) {
 		 
@@ -1689,20 +1715,26 @@ do{
 
 			  /* no file is open for this band, try to open one */
 			  sprintf(filname, "%s.%04d.raw",gpu_spec->rawinput->file_prefix,gpu_spec->rawinput->curfile);
-			  printf("filename is %s\n",filname);
+			  fprintf(stderr, "filename is %s\n",filname);
 			  if(exists(filname)){
-				 printf("opening %s\n",filname);				
+				 fprintf(stderr, "opening %s\n",filname);				
 				 gpu_spec->rawinput->fil = fopen(filname, "rb");			 
 
 				 if(gpu_spec->rawinput->curfile == 0 && gpu_spec->rawinput->first_file_skip != 0) fseek(gpu_spec->rawinput->fil, gpu_spec->rawinput->first_file_skip, SEEK_CUR);  
-
+				 fflush(stderr);
 			  }	else {
 			  	gpu_spec->rawinput->invalid = 1;
-		  	  	printf("couldn't open any more files!\n");
+		  	  	fprintf(stderr, "couldn't open any more files!\n");
+		  	  	fflush(stderr);
 		  	  }
 		  }
 
 	if(gpu_spec->rawinput->fil){
+
+		while(exists(SPINFILE) &&  gpu_spec->rawinput->spin == 1) {
+			usleep(2000000);
+		}
+
 
 		if(fread(buf, sizeof(char), 32768, gpu_spec->rawinput->fil) == 32768) {
 				
@@ -1868,6 +1900,14 @@ do{
 } while(!(gpu_spec->rawinput->invalid));
 
 free(channelbuffer);
+
+fprintf(stderr,"Ring read thread exiting...\n");
+fflush(stderr);
+/* lock done mutex */
+pthread_mutex_lock(&(gpu_spec->rawinput->donelock));
+gpu_spec->rawinput->doneflag = 1;
+sem_post(&(gpu_spec->rawinput->countsem));
+pthread_mutex_unlock(&(gpu_spec->rawinput->donelock));
 
 
 }
