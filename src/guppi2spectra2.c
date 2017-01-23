@@ -1731,7 +1731,7 @@ do{
 
 	if(gpu_spec->rawinput->fil){
 
-		while(exists(SPINFILE) &&  gpu_spec->rawinput->spin == 1) {
+		while(gpu_spec->rawinput->spin == 1 && exists(SPINFILE)) {
 			usleep(2000000);
 		}
 
