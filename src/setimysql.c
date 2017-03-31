@@ -25,39 +25,52 @@ MYSQL  *conn; /* pointer to connection handler */
 }
 
 void
-do_disconnect (MYSQL *conn)
+do_disconnect (MYSQL **conn)
 {
-  mysql_close (conn);
+  mysql_close (*conn);
 }
 
 void exiterr(int exitcode)
 {
-	fprintf( stderr, "%s\n", mysql_error(conn) );
+	fprintf( stderr, "ERROR\n");
 	exit( exitcode );
 }
 
-void dbconnect() {
+void dbconnect(MYSQL **conn) {
 
 
-strcpy(def_host_name, "localhost");
-strcpy(def_user_name, "root");
-//strcpy(def_password, "foobar");
-def_port_num = 9191;
-strcpy(def_db_name, "keplerseti");
+strcpy(def_host_name, "104.154.94.28");
+strcpy(def_user_name, "obs");
+strcpy(def_password, "");
+def_port_num = 3306;
+strcpy(def_db_name, "nwfb");
+*conn =  mysql_init(NULL); 
 
   printf("connecting...\n");
 /* Open connection to SQL Server */
-  conn = do_connect (def_host_name, def_user_name, def_password, def_db_name,
-                  def_port_num, def_socket_name, 0);
+//  *conn = do_connect (def_host_name, def_user_name, def_password, def_db_name,
+//                  def_port_num, def_socket_name, 0);
 
+  if (mysql_real_connect (*conn, def_host_name, def_user_name, def_password,
+            def_db_name, def_port_num, def_socket_name, 0) == NULL)
+  {
+    fprintf (stderr, "mysql_real_connect() failed:\nError %u (%s)\n",
+              mysql_errno (conn), mysql_error (conn));
+    return (NULL);
+  }
 
-  if (conn == NULL) {
+	printf("mysql connected\n");
+
+  if (*conn == NULL) {
 	printf("mysql connect failed!\n");
   	exiterr(1);
   }
 
 /* Connect to database */    
-	if (mysql_select_db(conn,def_db_name))
+	if (mysql_select_db(*conn,def_db_name))
 		exiterr(2);
+		
+	printf("db connected\n");
+		
 
 }

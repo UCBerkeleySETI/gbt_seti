@@ -29,6 +29,8 @@
 #include <pthread.h>
 #include "filterbank_header.h"
 #include "filterbankutil.h"
+#include <mysql.h>
+#include "setimysql.h"
 
 
 /*
@@ -64,6 +66,7 @@ int main(int argc, char *argv[]) {
 	struct filterbank_input sourcea;	
 	struct filterbank_input sourceb;
 	
+	sourcea.bucketname = NULL;
 	/* enable doppler search mode */
 	int dopplersearchmode = 0;
 
@@ -76,7 +79,7 @@ int main(int argc, char *argv[]) {
 	long int i,j,k;
 	opterr = 0;
  
-	while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:m:a:")) != -1)
+	while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:m:a:s:")) != -1)
 	  switch (c)
 		{
 		case 'a':
@@ -87,6 +90,14 @@ int main(int argc, char *argv[]) {
 		  break;
 		case 'd':
 		  dopplersearchmode = 1;
+		  break;
+		case 's':
+		  sourcea.bucketname = optarg;
+		  sourceb.bucketname = optarg;
+		  break;
+		case 'f':
+		  sourcea.folder = optarg;
+		  sourceb.folder = optarg;
 		  break;
 		case '?':
 		  if (optopt == 'i' || optopt == 'o' || optopt == '1' || optopt == '2' || optopt == '3' || optopt == '4' || optopt == '5' || optopt == '6'|| optopt == '7' || optopt == '8')
@@ -102,10 +113,30 @@ int main(int argc, char *argv[]) {
 		  abort ();
 		}
 
+
+	sourcea.zapwidth = 1;
+	sourceb.zapwidth = 1;
+
+	sourcea.candwidth = 512;
+	sourceb.candwidth = 512;
+	
+
+	if(sourcea.bucketname == NULL || strlen(sourcea.bucketname) < 1) {
+		printf("Invalid bucketname: %s  Specify with -s <bucket_name>.\n", sourcea.bucketname);
+		exit(1);
+	}
+	
+	//dbconnect(sourcea.conn);
 	
 	sourcea.inputfile = fopen(sourcea.filename, "rb");
 	read_filterbank_header(&sourcea);
-		    
+	
+	/* guess number of polyphase channels */
+	sourcea.polychannels = (long int) round(fabs((double) sourcea.nchans * (double) sourcea.foff)/(187.5/64)); 
+	sourceb.polychannels = sourcea.polychannels;
+	
+	fprintf(stderr, "%d %f Polyphase channels %ld\n", sourcea.nchans, sourcea.foff, sourcea.polychannels);
+
     fprintf(stderr, "Read and summed %d integrations for sourcea\n", sum_filterbank(&sourcea));
 	sourceb.inputfile = fopen(sourceb.filename, "rb");
 
@@ -124,8 +155,11 @@ int main(int argc, char *argv[]) {
     
     for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourcea.integrated_spectrum[i] - sourceb.integrated_spectrum[i])/sourceb.integrated_spectrum[i];
 	normalize(diff_spectrum, (long int) sourcea.nchans);
+	candsearch_onoff(diff_spectrum, 512, 10, &sourcea, &sourceb);   
 
-	candsearch_onoff(diff_spectrum, 512, 20, &sourcea, &sourceb);   
+    for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourceb.integrated_spectrum[i] - sourcea.integrated_spectrum[i])/sourcea.integrated_spectrum[i];
+	normalize(diff_spectrum, (long int) sourceb.nchans);
+	candsearch_onoff(diff_spectrum, 512, 10, &sourceb, &sourcea);   
 
 
   /* */

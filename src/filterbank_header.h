@@ -5,6 +5,8 @@
 #include <string.h>
 #include "imswap.h"
 #include <sys/stat.h>
+#include "mysql.h"
+
 
 #pragma once
  
@@ -39,7 +41,16 @@ struct filterbank_input {
     int headersize;
     int nbins;
 	double period;
-
+	long int polychannels;  //Number of polyphase channels in the file
+	long int candwidth;
+	long int zapwidth;
+	float *data;
+	long int dimY;
+	long int dimX;
+	FILE *candfile;
+	char *bucketname;
+	char *folder;
+	MYSQL *conn;
 };
 
 

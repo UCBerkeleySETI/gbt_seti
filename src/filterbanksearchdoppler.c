@@ -74,8 +74,6 @@ int main(int argc, char *argv[]) {
 	sourcea.zapwidth = 1;
 	sourceb.zapwidth = 1;
 	
-	sourcea.polychannels = 64;
-	sourceb.polychannels = 64;
 
 	sourcea.candwidth = 512;
 	sourceb.candwidth = 512;
@@ -133,6 +131,11 @@ int main(int argc, char *argv[]) {
 	}
 	
 	read_filterbank_header(&sourcea);
+	
+	sourcea.polychannels = (long int) round(fabs(sourcea.nchannels * sourcea.foff)/(187.5/64)); 
+	sourceb.polychannels = sourcea.polychannels;
+	//sourcea.polychannels = 64;
+	//sourceb.polychannels = 64;
 		    
     fprintf(stderr, "Read and summed %d integrations for sourcea\n", sum_filterbank(&sourcea));
 

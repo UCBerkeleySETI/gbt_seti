@@ -22,13 +22,15 @@ endif
 CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
 PROGS = test_psrfits_read \
 	raw_quant raw_read massage_vpm \
-	treedop raw_head two2eight filterbanksearch
+	treedop raw_head two2eight filterbanksearch s3test
+
+#filterbanksearchdoppler
 GPU_PROGS = gpuspec gpuspec2 raw2wu test_guppi2spectra
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o imswap.o\
 	write_psrfits.o read_psrfits.o misc_utils.o read_filterbank_header.o filterbankutil.o \
-	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o
-LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib
+	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o s3util.o
+LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib -ls3
 
 SLAOBJS = slalib/addet.o slalib/afin.o slalib/airmas.o slalib/altaz.o                \
 	slalib/amp.o slalib/ampqk.o slalib/aop.o slalib/aoppa.o slalib/aoppat.o      \
