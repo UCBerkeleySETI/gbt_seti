@@ -44,9 +44,23 @@ struct filterbank_input {
 	long int polychannels;  //Number of polyphase channels in the file
 	long int candwidth;
 	long int zapwidth;
+
+
+
 	float *data;
+    float *datarev;
+    float *result;
+    float *revresult;
+
+	float *maxsnr;
+	float *maxdrift;
+	float *maxsnrrev;
+	float *maxdriftrev;
+
 	long int dimY;
 	long int dimX;
+	long int Xpadframes;
+
 	FILE *candfile;
 	char *bucketname;
 	char *folder;

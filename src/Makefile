@@ -22,9 +22,7 @@ endif
 CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include
 PROGS = test_psrfits_read \
 	raw_quant raw_read massage_vpm \
-	treedop raw_head two2eight filterbanksearch s3test
-
-#filterbanksearchdoppler
+	treedop raw_head two2eight filterbanksearch s3test filterbanksearchdoppler
 GPU_PROGS = gpuspec gpuspec2 raw2wu test_guppi2spectra
 OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o imswap.o\
@@ -122,7 +120,8 @@ install: install-progs install-libs
 	echo 'test -e $(CUDA)/cuda.sh && source $(CUDA)/cuda.sh'       > $(prefix)/listen.sh
 	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' >> $(prefix)/listen.sh
 	echo 'export PATH="$${PATH}:$(BINDIR)"'                       >> $(prefix)/listen.sh
-
+	cat setkeys.sh >> $(prefix)/listen.sh
+	
 install-progs: $(PROGS) $(GPU_PROGS)
 	mkdir -p $(BINDIR)
 	cp -f $^ $(BINDIR)

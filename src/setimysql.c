@@ -1,6 +1,9 @@
 #include <stdio.h>
 #include <mysql.h>
 #include "setimysql.h"
+#include <stdlib.h>
+
+
 
 MYSQL *
 do_connect (char *host_name, char *user_name, char *password, char *db_name,
@@ -38,18 +41,55 @@ void exiterr(int exitcode)
 
 void dbconnect(MYSQL **conn) {
 
+	char *envvar = NULL;
 
-strcpy(def_host_name, "104.154.94.28");
-strcpy(def_user_name, "obs");
-strcpy(def_password, "");
-def_port_num = 3306;
-strcpy(def_db_name, "nwfb");
-*conn =  mysql_init(NULL); 
+  strcpy(def_host_name, "104.154.94.28");
+  strcpy(def_user_name, "obs");
+  strcpy(def_password, "");
+  def_port_num = 3306;
+  strcpy(def_db_name, "nwfb");
+
+
+    envvar = getenv("SETI_HOST_NAME");
+    if (!envvar) {
+        fprintf(stderr, "Missing environment variable: SETI_HOST_NAME\n");
+		exit(1);
+    }
+	
+	
+    strcpy(def_host_name, envvar);
+
+    envvar = getenv("SETI_DATABASE_NAME");
+    if (!envvar) {
+        fprintf(stderr, "Missing environment variable: SETI_DATABASE_NAME\n");
+        exit(1);
+    }
+
+    strcpy(def_db_name, envvar);
+
+
+    envvar = getenv("SETI_USER_NAME");
+    if (!envvar) {
+        fprintf(stderr, "Missing environment variable: SETI_USER_NAME\n");
+        exit(1);
+    }
+
+    strcpy(def_user_name, envvar);
+
+    envvar = getenv("SETI_PORT_NUM");
+    if (!envvar) {
+        fprintf(stderr, "Missing environment variable: SETI_DATABASE_NUM\n");
+        exit(1);
+    }
+    def_port_num = atoi(envvar);
+
+
 
   printf("connecting...\n");
-/* Open connection to SQL Server */
-//  *conn = do_connect (def_host_name, def_user_name, def_password, def_db_name,
-//                  def_port_num, def_socket_name, 0);
+
+
+  *conn =  mysql_init(NULL); 
+
 
   if (mysql_real_connect (*conn, def_host_name, def_user_name, def_password,
             def_db_name, def_port_num, def_socket_name, 0) == NULL)
@@ -66,7 +106,7 @@ strcpy(def_db_name, "nwfb");
   	exiterr(1);
   }
 
-/* Connect to database */    
+	/* Connect to database */    
 	if (mysql_select_db(*conn,def_db_name))
 		exiterr(2);
 		

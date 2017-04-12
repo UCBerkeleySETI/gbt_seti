@@ -60,6 +60,7 @@ Number of IFs                    : 1
 
 
 
+void filterbanksearch_print_usage();
 
 int main(int argc, char *argv[]) {
 
@@ -77,11 +78,26 @@ int main(int argc, char *argv[]) {
 
 	int c;
 	long int i,j,k;
+	float zscore = 15;
 	opterr = 0;
  
-	while ((c = getopt (argc, argv, "Vvdi:o:c:f:b:s:p:m:a:s:")) != -1)
+ 	sourcea.zapwidth = 1;
+	sourceb.zapwidth = 1;
+
+	sourcea.candwidth = 512;
+	sourceb.candwidth = 512;
+	sourcea.filename = NULL;
+	sourceb.filename = NULL;
+    sourcea.Xpadframes = 0;
+	sourceb.Xpadframes = 0;
+ 
+	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:")) != -1)
 	  switch (c)
 		{
+		case 'h':
+		  filterbanksearch_print_usage();
+		  exit(0);
+		  break;
 		case 'a':
 		  sourcea.filename = optarg;
 		  break;
@@ -90,6 +106,9 @@ int main(int argc, char *argv[]) {
 		  break;
 		case 'd':
 		  dopplersearchmode = 1;
+		  break;
+		case 'z':
+		  zscore = (float) atof(optarg);
 		  break;
 		case 's':
 		  sourcea.bucketname = optarg;
@@ -114,15 +133,15 @@ int main(int argc, char *argv[]) {
 		}
 
 
-	sourcea.zapwidth = 1;
-	sourceb.zapwidth = 1;
-
-	sourcea.candwidth = 512;
-	sourceb.candwidth = 512;
 	
 
 	if(sourcea.bucketname == NULL || strlen(sourcea.bucketname) < 1) {
 		printf("Invalid bucketname: %s  Specify with -s <bucket_name>.\n", sourcea.bucketname);
+		exit(1);
+	}
+	
+	if(!sourcea.filename || !sourceb.filename) {
+		filterbanksearch_print_usage();
 		exit(1);
 	}
 	
@@ -155,11 +174,11 @@ int main(int argc, char *argv[]) {
     
     for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourcea.integrated_spectrum[i] - sourceb.integrated_spectrum[i])/sourceb.integrated_spectrum[i];
 	normalize(diff_spectrum, (long int) sourcea.nchans);
-	candsearch_onoff(diff_spectrum, 512, 10, &sourcea, &sourceb);   
+	candsearch_onoff(diff_spectrum, 512, zscore, &sourcea, &sourceb);   
 
     for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourceb.integrated_spectrum[i] - sourcea.integrated_spectrum[i])/sourcea.integrated_spectrum[i];
 	normalize(diff_spectrum, (long int) sourceb.nchans);
-	candsearch_onoff(diff_spectrum, 512, 10, &sourceb, &sourcea);   
+	candsearch_onoff(diff_spectrum, 512, zscore, &sourceb, &sourcea);   
 
 
   /* */
@@ -181,6 +200,8 @@ int main(int argc, char *argv[]) {
 return 0;
 
 }
+
+
 
 
 

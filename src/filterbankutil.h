@@ -29,3 +29,4 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 
 int sum_filterbank(struct filterbank_input *input);
 
+void filterbanksearch_print_usage(); 

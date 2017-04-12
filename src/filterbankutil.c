@@ -184,7 +184,7 @@ long int filterbank_extract_from_file(float *output, long int tstart, long int t
 		fseek(input->inputfile, chanstart * sizeof(float), SEEK_CUR);
 
 		  while (i < (tend-tstart) ) {	
-			   fread(output + (chanend - chanstart) * i, sizeof(char), (chanend - chanstart) * sizeof(float), input->inputfile);  
+			   fread(output + (chanend - chanstart) * i + (i*input->dimY*input->Xpadframes*2) + (input->dimY*input->Xpadframes), sizeof(char), (chanend - chanstart) * sizeof(float), input->inputfile);  
 			   fseek(input->inputfile, (input->nchans - (chanend-chanstart)) * sizeof(float), SEEK_CUR);
 			   i++;
 		  }
@@ -452,7 +452,7 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 
 //				   fprintf(input->candfile, "INSERT INTO hits (source, %s, %s, %f, %f, %lf, %6.10f \n", input->filename, input->source_name, input->tstart, filterbank_chan_freq(input, i), diff_spectrum[i], fabs(input->foff));
 				sprintf(query, "INSERT INTO hits (source, mjd, frequency, finechannel, zscore, bw) VALUES (\"%s\", %5.5f, %f, %ld, %lf, %6.10f)", input->source_name, input->tstart, filterbank_chan_freq(input, i), i, diff_spectrum[i], fabs(input->foff));
-				printf("%s\n", query);
+				//printf("%s\n", query);
 				
 				   /*
 				sprintf(query, "INSERT INTO rawhits \
@@ -474,7 +474,6 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 					
 				}  
 				
- 				printf("ran query\n");
 
 				   memset(fitsdata, 0x0, fitslen * sizeof(char));
 				   filterbank2fits(fitsdata, snap, candwidth, input->nsamples, i, diff_spectrum[i], 0.0, input);
@@ -568,7 +567,6 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 
 
 
-
 int sum_filterbank(struct filterbank_input *input) {
 	long int i,j,k;
     input->integrated_spectrum = (float*) malloc(input->nchans * sizeof(float));
@@ -582,6 +580,25 @@ int sum_filterbank(struct filterbank_input *input) {
     	   j++;
     }
     return j;
+}
+
+
+void filterbanksearch_print_usage() /*includefile*/
+{
+  printf("\n");
+  printf("filterbanksearch  - search filterbank format data for signals from aliens\n\n");
+  printf("usage: filterbanksearch -a <ON source file name> -b <OFF source file name> -{options}\n\n");
+  printf("options:\n\n");
+  printf("-a <file>      	 	- set ON source file\n");
+  printf("-b <file>       		- set OFF source file \n");
+  printf("-s <string>     		- set name of S3 bucket\n");
+  printf("-f <string>     		- set folder path\n");
+  printf("-m <string>       	- set name of MYSQL database\n");
+  printf("-t <thresh>         	- set number of bits per sample\n");
+  printf("-z <thresh>         	- set threshold for events\n");
+  printf("\n");
+  printf("Meaningful Environment Variables:\n");  
+  printf("\n");
 }
 
 
