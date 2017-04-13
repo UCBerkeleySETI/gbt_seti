@@ -33,7 +33,7 @@
 #include "filterbankutil.h"
 
 
-#define MAXBLOCK 1<<26  //Set maximum size of a memory allocation per file
+#define MAXBLOCK 1<<28  //Set maximum size of a memory allocation per file
 
 /*
 Data file                        : blc07_guppi_57601_39735_Hip116819_0061.gpuspec.0002.fil
@@ -78,7 +78,7 @@ struct diff_search {
 	float *maxsnr;
 	float *maxdrift;
 	float zscore;
-	
+	long int nsamples;
 };
 
 long int bitrev(long int inval,long int nbits);
@@ -289,6 +289,50 @@ int main(int argc, char *argv[]) {
 	for(i=0;i<sourcea.nsamples;i++) printf("%d \n", drift_indexes[i]);	
 
 
+		diffdata[0].onsource = sourcea.data;
+		diffdata[0].offsource = sourceb.data;
+		diffdata[0].result = sourcea.result;
+		diffdata[0].maxsnr = sourcea.maxsnr;
+		diffdata[0].maxdrift = sourcea.maxdrift;
+		
+		diffdata[1].onsource = sourceb.data;
+		diffdata[1].offsource = sourcea.data;
+		diffdata[1].result = sourceb.result;
+		diffdata[1].maxsnr = sourceb.maxsnr;
+		diffdata[1].maxdrift = sourceb.maxdrift;
+
+		diffdata[2].onsource = sourcea.datarev;
+		diffdata[2].offsource = sourceb.datarev;
+		diffdata[2].result = sourcea.revresult;
+		diffdata[2].maxsnr = sourcea.maxsnrrev;
+		diffdata[2].maxdrift = sourcea.maxdriftrev;
+
+		diffdata[3].onsource = sourceb.datarev;
+		diffdata[3].offsource = sourcea.datarev;
+		diffdata[3].result = sourceb.revresult;
+		diffdata[3].maxsnr = sourceb.maxsnrrev;
+		diffdata[3].maxdrift = sourceb.maxdriftrev;
+		
+		for(j=0;j<4;j++) {
+			data[j].mlen = sourcea.dimX * sourcea.dimY;
+			data[j].nchn = sourcea.dimY;
+			diffdata[j].dimX = sourcea.dimX;	
+			diffdata[j].dimY = sourcea.dimY;	
+			diffdata[j].drift_indexes = drift_indexes;
+			diffdata[j].zscore = zscore;
+			diffdata[j].nsamples = sourcea.nsamples;
+		}
+
+		data[0].outbuf = sourcea.data;		
+		data[1].outbuf = sourceb.data;		
+		data[2].outbuf = sourcea.datarev;		
+		data[3].outbuf = sourceb.datarev;
+
+
+
+	float drift_rate_resolution;
+	drift_rate_resolution = (1000000.0 * sourcea.nsamples * sourcea.tsamp); // Hz/sec - guppi chan bandwidth is in MHz
+
 	for(i=0;i<sourcea.polychannels;i=i+channels_to_read){	
 
 
@@ -308,20 +352,9 @@ int main(int argc, char *argv[]) {
 		FlipX(sourceb.datarev, sourceb.dimX, sourceb.dimY);
 
 				
-		for(j=0;j<4;j++) {
-			data[j].mlen = sourcea.dimX * sourcea.dimY;
-			data[j].nchn = sourcea.dimY;
-			diffdata[j].dimX = sourcea.dimX;	
-			diffdata[j].dimY = sourcea.dimY;	
-			diffdata[j].drift_indexes = drift_indexes;
-			diffdata[j].zscore = zscore;
-			
-		}
+		
+		//for(k=0;k<10;k++) printf("%g %g %g \n", sourcea.data[i], sourceb.data[i],result[i]);
 
-		data[0].outbuf = sourcea.data;		
-		data[1].outbuf = sourceb.data;		
-		data[2].outbuf = sourcea.datarev;		
-		data[3].outbuf = sourceb.datarev;		
 
 		pthread_create (&taylor_th0, NULL, (void *) &taylor_flt_threaded, (void *) &data[0]);
 		pthread_create (&taylor_th1, NULL, (void *) &taylor_flt_threaded, (void *) &data[1]);
@@ -360,31 +393,21 @@ int main(int argc, char *argv[]) {
 		}
 */
 
-		diffdata[0].onsource = sourcea.data;
-		diffdata[0].offsource = sourceb.data;
-		diffdata[0].result = sourcea.result;
-		diffdata[0].maxsnr = sourcea.maxsnr;
-		diffdata[0].maxdrift = sourcea.maxdrift;
+
 		
+		
+		memset(sourcea.maxsnr, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourcea.maxdrift, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourcea.maxsnrrev, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourcea.maxdriftrev, 0x0, sizeof(float) * sourcea.dimX);
 
-		diffdata[1].onsource = sourceb.data;
-		diffdata[1].offsource = sourcea.data;
-		diffdata[1].result = sourceb.result;
-		diffdata[1].maxsnr = sourceb.maxsnr;
-		diffdata[1].maxdrift = sourceb.maxdrift;
+		memset(sourceb.maxsnr, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourceb.maxdrift, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourceb.maxsnrrev, 0x0, sizeof(float) * sourcea.dimX);
+		memset(sourceb.maxdriftrev, 0x0, sizeof(float) * sourcea.dimX);
 
-		diffdata[2].onsource = sourcea.datarev;
-		diffdata[2].offsource = sourceb.datarev;
-		diffdata[2].result = sourcea.revresult;
-		diffdata[2].maxsnr = sourcea.maxsnrrev;
-		diffdata[2].maxdrift = sourcea.maxdriftrev;
-
-
-		diffdata[3].onsource = sourceb.datarev;
-		diffdata[3].offsource = sourcea.datarev;
-		diffdata[3].result = sourceb.revresult;
-		diffdata[3].maxsnr = sourceb.maxsnrrev;
-		diffdata[3].maxdrift = sourceb.maxdriftrev;
+		fprintf(stderr,"%ld launch diff!\n",i);	
+		fflush(stderr);
 
 		pthread_create (&diff_th0, NULL, (void *) &diff_search_thread, (void *) &diffdata[0]);
 		pthread_create (&diff_th1, NULL, (void *) &diff_search_thread, (void *) &diffdata[1]);
@@ -399,11 +422,16 @@ int main(int argc, char *argv[]) {
 
 
 
+		for(j=(sourcea.Xpadframes * sourcea.dimY);j<(sourcea.dimX - (2 * sourcea.Xpadframes * sourcea.dimY));j++) {
+			if (sourcea.maxsnr[j] > 0) printf("Cand at %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n", j, sourcea.dimX, sourcea.maxsnr[j], sourcea.maxdrift[j] * drift_rate_resolution, sourceb.maxsnr[j]);
+		}
+
+
+
 
 	}
 	
 
-	
 
 
 
@@ -623,6 +651,7 @@ void diff_search_thread(void *ptr) {
 	int * drift_indexes;
 	int indx;
 	float zscore;
+	long int nsamples;
 	
 	struct diff_search *diffdata;
 	diffdata = (struct diff_search *) ptr;
@@ -635,25 +664,34 @@ void diff_search_thread(void *ptr) {
 	maxsnr = diffdata->maxsnr;
 	maxdrift = diffdata->maxdrift;
 	zscore = diffdata->zscore;
+	nsamples = diffdata->nsamples;
 
 	drift_indexes = diffdata->drift_indexes;
 
 	for(i=0;i<(dimX*dimY);i++){
 		result[i] = (onsource[i] - offsource[i]) / offsource[i];
+		if(isnan(result[i]) || isinf(result[i])) result[i] = 0;
 	}
 	
+	
+	//for(i=1000;i<1010;i++) printf("before %g %g %g \n", onsource[i], offsource[i],result[i]);
+
 	for(i=0;i<(dimX*dimY);i = i + dimX) normalize(result + i, dimX);
 
-	for(i=0;i<(dimY);i = i + 1) {
+
+	//for(i=1000;i<1010;i++) printf("after %g %g %g \n", onsource[i], offsource[i],result[i]);
+	
+	for(i=0;i<(nsamples);i = i + 1) {
 		indx = drift_indexes[i];
+		//printf("running zscore: %g index: %d...\n", zscore, indx);
 		for(j=0;j<dimX;j++){
-	     	if (result[indx * dimY + j] > zscore && result[indx * dimY + j] > maxsnr[j]) {		
-	     		maxsnr[j] = result[indx * dimY + j];
-	     		maxdrift[j] = i;
-	     		
+	     	if (result[indx * dimX + j] > zscore && result[indx * dimX + j] > maxsnr[j]) {		
+	     		maxsnr[j] = result[indx * dimX + j];
+	     		maxdrift[j] = (float) i;
 	     	}
 		}	
 	}
+	
 	
 	
 	

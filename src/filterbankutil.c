@@ -107,12 +107,16 @@ void comp_stats(double *mean, double *stddev, float *vec, long int veclen){
 	double tmean = 0;
 	double tstddev = 0;
 	long int valid_points=0;
-		
+	
+
+	
 	for(i=0;i<veclen;i++) {
 			tmean = tmean + (double) vec[i];
 			tstddev = tstddev + ((double) vec[i] * vec[i]);
 			valid_points++;
 	}
+	
+	//for(i=1000;i<1010;i++) printf("in comp stats %g \n", vec[i]);
 	
 	tstddev = pow((tstddev - ((tmean * tmean)/valid_points))/(valid_points - 1), 0.5);
 	tmean = tmean / (valid_points);	
@@ -130,15 +134,21 @@ void normalize (float *vec, long int veclen) {
 	float tmpmeanf;
 	float tmpstdf;
 	long int i;
+	
+
 	comp_stats(&tmpmean, &tmpstd, vec, veclen);
+
 
 	tmpmeanf = (float) tmpmean;
 	tmpstdf = (float) tmpstd;
+
+	//for(i=1000;i<1010;i++) printf("innormalize %g %g %g \n", vec[i], tmpmeanf, tmpstdf);
 
 	/* normalize */
     for(i=0;i<veclen;i++) vec[i] = (vec[i] - tmpmeanf)/ tmpstdf;
 
 }
+
 
 
 long int sizeof_file(char name[]) /* includefile */
