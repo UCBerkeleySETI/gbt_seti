@@ -3,6 +3,9 @@
 #include "s3util.h"
 #include <mysql.h>
 #include "setimysql.h"
+#include <bson.h>
+#include <bcon.h>
+#include <mongoc.h>
 
 #define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
@@ -38,13 +41,17 @@ void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long
 char * buf;
 long int i,j,k;
 
+	printf("in filterbank2fits\n");
+	fflush(stdout);
+	
 buf = (char *) malloc(2880 * sizeof(char));
 /* zero out header */
 memset(buf, 0x0, 2880);
-
+	
 	strcpy (buf, "END ");
+	
 	for(i=4;i<2880;i++) buf[i] = ' ';
-
+	
 	hlength (buf, 2880);
 
 	hadd(buf, "SOURCE");
@@ -85,10 +92,10 @@ memset(buf, 0x0, 2880);
 	
 	memcpy(fitsdata+2880, datavec, (nchan * nsamp) * 4);
 	
+	
 	/* create zero pad buffer */
 	memset(buf, 0x0, 2880);
 	for(i=0;i<2880;i++) buf[i] = ' ';
-	
 	memcpy(fitsdata + 2880 + (nchan * nsamp * 4), buf, 2880 - ((nchan * nsamp *4)%2880));
 	free(buf);
 }
@@ -164,6 +171,39 @@ long int sizeof_file(char name[]) /* includefile */
      return stbuf.st_size;
 }
 
+
+long int filterbank_extract_from_buffer(float *output, long int tstart, long int tend, long int chanstart, long int chanend, struct filterbank_input *input) {
+	long int i,j, k, m, n, left, right;
+	i=0;
+	j=0;
+	long int nchanraw;
+	nchanraw = input->dimX - (input->Xpadframes * 2 * input->dimY);
+	
+	if(chanend > nchanraw) {
+
+		 for(i = tstart;i<tend;i++) {
+			   memcpy(output + (chanend - chanstart) * i, input->rawdata + (nchanraw * i), (nchanraw - chanstart) * sizeof(float));
+		 }
+	
+	} else if (chanstart < 0) {
+		 
+		 for(i = tstart;i<tend;i++) {
+			   memcpy(output + labs(chanstart) + ((chanend + labs(chanstart)) * i), input->rawdata + (nchanraw * i), chanend * sizeof(float));
+		 }
+			
+	} else { 
+
+		 for(i = tstart;i<tend;i++) {
+			   memcpy(output + (chanend - chanstart) * i, input->rawdata + (nchanraw * i) + chanstart, (chanend - chanstart) * sizeof(float));
+		 }
+
+	}
+	
+	return i;
+}
+
+
+
 long int filterbank_extract_from_file(float *output, long int tstart, long int tend, long int chanstart, long int chanend, struct filterbank_input *input) {
 	long int i,j, k, m, n, left, right;
 	float mean=0;
@@ -194,7 +234,7 @@ long int filterbank_extract_from_file(float *output, long int tstart, long int t
 		fseek(input->inputfile, chanstart * sizeof(float), SEEK_CUR);
 
 		  while (i < (tend-tstart) ) {	
-			   fread(output + (chanend - chanstart) * i + (i*input->dimY*input->Xpadframes*2) + (input->dimY*input->Xpadframes), sizeof(char), (chanend - chanstart) * sizeof(float), input->inputfile);  
+			   fread(output + (chanend - chanstart) * i, sizeof(char), (chanend - chanstart) * sizeof(float), input->inputfile);  
 			   fseek(input->inputfile, (input->nchans - (chanend-chanstart)) * sizeof(float), SEEK_CUR);
 			   i++;
 		  }
@@ -215,24 +255,24 @@ long int filterbank_extract_from_file(float *output, long int tstart, long int t
 			  for(m = 0; m < (tend-tstart); m++) {
 
 				   if(left >= 0 && right < input->nchans) {
-						 mean = (output[left+(m * input->candwidth)] + output[right+(m * input->candwidth)])/2;
+						 mean = (output[left+(m * (chanend-chanstart))] + output[right+(m * (chanend-chanstart))])/2;
 				   } else if (left < 0 && right < input->nchans) {
-						 mean = (output[right+(m * input->candwidth)]);
+						 mean = (output[right+(m * (chanend-chanstart))]);
 				   } else if (left >= 0 && right >= input->nchans) {
-						 mean = (output[left+(m * input->candwidth)]);
+						 mean = (output[left+(m * (chanend-chanstart))]);
 				   }
 
 
 
 				   for(k = max(0, (left+1));k < min(right, input->nchans);k++) {
-						output[k + (m * input->candwidth)] = mean;				   
+						output[k + (m * (chanend-chanstart))] = mean;				   
 						}			  
 			  }
 
 		  }					  
 			  
 	    }
-	
+
 	
 	//if (channel + 1/2 polyphase length) % polyphase length == 0
 	
@@ -315,6 +355,634 @@ long int candsearch(float *diff_spectrum, long int candwidth, float thresh, stru
 	free(snap);
 	
 }	
+
+
+
+
+
+
+long int candsearch_doppler(float thresh, struct filterbank_input *input, struct filterbank_input *offsource) {
+
+	long int i, j, k;
+	long int fitslen;
+	char *fitsdata;
+	FILE *fitsfile;
+	char fitsname[100];
+	char candname[150];
+	float *snap;
+	float *snapoff;
+	
+	long int startchan;
+	long int endchan;
+	long int onout;
+	long int offout;
+	
+	
+	int goodcandidate = 0;
+	char query[4096];
+	MYSQL *conn;
+
+	//char bucketName[255];
+	//sprintf(bucketName, "norwegianfits");
+
+
+	S3_init();
+	dbconnect(&conn);
+
+	long int candwidth;
+	
+	candwidth = input->candwidth;
+
+    const char *uploadId = 0;
+    const char *cacheControl = 0, *contentType = 0, *md5 = 0;
+    const char *contentDispositionFilename = 0, *contentEncoding = 0;
+    int64_t expires = -1;
+    int metaPropertiesCount = 0;
+    S3NameValue metaProperties[S3_MAX_METADATA_COUNT];
+    char useServerSideEncryption = 0;
+    int noStatus = 0;
+
+
+    put_object_callback_data data;
+
+	S3BucketContext bucketContext =
+    {
+        0,
+        input->bucketname,
+        protocolG,
+        uriStyleG,
+        accessKeyIdG,
+        secretAccessKeyG,
+        0,
+        awsRegionG
+    };
+
+    S3PutProperties putProperties =
+    {
+        contentType,
+        md5,
+        cacheControl,
+        contentDispositionFilename,
+        contentEncoding,
+        expires,
+        cannedAcl,
+        metaPropertiesCount,
+        metaProperties,
+        useServerSideEncryption
+    };
+    
+    S3PutObjectHandler putObjectHandler =
+    {
+        { &responsePropertiesCallback, &responseCompleteCallback },
+        &putObjectDataCallback
+    };
+
+	
+	
+	fitslen = 2880 + (candwidth * input->nsamples * 4) + 2880 - ((candwidth * input->nsamples * 4)%2880);
+	fitsdata = (char *) malloc(fitslen);
+	
+	snap = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+	snapoff = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+	
+		
+	float drift_rate_resolution = (input->foff * input->nsamples * input->tsamp);
+	float onsourcesnr = 0;
+	float offsourcesnr = 0;
+	double drift = 0;
+	double frequency = 0;
+	long int finechannel = 0;
+
+	
+	for(j=(input->Xpadframes * input->dimY);j<(input->dimX - (input->Xpadframes * input->dimY));j++) {
+
+
+			goodcandidate = 0;
+
+			if (input->maxsnr[j] > thresh) {
+
+				//printf("%s: Cand at frequency: %15.6lf bandwidth: %15.6g %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n", sourcea.filename, filterbank_chan_freq(&sourcea, j-(sourcea.Xpadframes * sourcea.dimY)), sourcea.foff, j, sourcea.dimX, sourcea.maxsnr[j], sourcea.maxdrift[j] * drift_rate_resolution, sourceb.maxsnr[j]);
+
+				onsourcesnr = input->maxsnr[j];
+				offsourcesnr = offsource->maxsnr[j];
+				drift = input->maxdrift[j] * drift_rate_resolution;
+				finechannel = (j-(input->Xpadframes * input->dimY));				
+				frequency = filterbank_chan_freq(input, input->currentstartchan + finechannel);
+				
+				goodcandidate = 1;
+			}
+			
+			if (input->maxsnrrev[j] > thresh) {
+				//printf("%s: Cand at frequency: %15.6lf bandwidth: %15.6g %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n",sourcea.filename, filterbank_chan_freq(&sourcea, j-(sourcea.Xpadframes * sourcea.dimY)), sourcea.foff, j, sourcea.dimX, sourcea.maxsnrrev[j], sourcea.maxdrift[j] * drift_rate_resolution * -1, sourceb.maxsnrrev[j]);
+	
+				onsourcesnr = input->maxsnrrev[j];
+				offsourcesnr = offsource->maxsnrrev[j];
+				drift = input->maxdriftrev[j] * drift_rate_resolution * -1;
+				finechannel = (j-(input->Xpadframes * input->dimY));				
+				frequency = filterbank_chan_freq(input, input->currentstartchan + finechannel);
+				goodcandidate = 1;
+			}
+		 
+		 
+		 if(goodcandidate == 1) {
+		 	startchan = finechannel - candwidth/2;
+			endchan = finechannel + candwidth/2;
+		 
+		 
+				memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
+				memset(snapoff, 0x0, candwidth * input->nsamples * sizeof(float));
+
+
+				onout = filterbank_extract_from_buffer(snap, 0, input->nsamples, startchan, endchan, input);
+				offout = filterbank_extract_from_buffer(snapoff, 0, offsource->nsamples, startchan, endchan, offsource);
+					
+					
+				sprintf(query, "INSERT INTO hits (source, mjd, frequency, finechannel, zscore, bw, driftrate) VALUES (\"%s\", %5.5f, %f, %ld, %lf, %6.10f, %lf)", input->source_name, input->tstart, frequency, input->currentstartchan +finechannel, onsourcesnr, fabs(input->foff), drift);
+
+
+
+				//printf("%s\n", query);
+				
+				   
+				  if (mysql_query(conn,query)){
+					if(mysql_errno(conn) == 1062) {
+					fprintf(stderr, "Duplicate! %d\n", mysql_errno(conn));
+					printf("INSERT INTO hits (source, mjd, frequency, finechannel, zscore, bw, driftrate) VALUES (\"%s\", %5.5f, %f, %ld, %lf, %6.10f, %lf)", input->source_name, input->tstart, frequency, input->currentstartchan +finechannel, onsourcesnr, fabs(input->foff), drift);
+
+					} else {
+
+					fprintf(stderr, "Error inserting raw hit into sql database...%d\n", mysql_errno(conn));
+					exiterr(3);
+					}
+					
+				   }  
+				
+
+
+				   memset(fitsdata, 0x0, fitslen * sizeof(char));
+				   filterbank2fits(fitsdata, snap, candwidth, input->nsamples, input->currentstartchan + finechannel, onsourcesnr, drift, input);
+
+			  	   if (input->folder != NULL) {
+   				   		sprintf(fitsname, "%s/%s_%5.5f_%ld.fits", input->folder,input->source_name, input->tstart, input->currentstartchan +finechannel);
+				   } else {
+				      	 sprintf(fitsname, "%s_%5.5f_%ld.fits",input->source_name, input->tstart, input->currentstartchan +finechannel);
+
+				   }
+				   
+				   data.infile = 0;
+				   data.gb = 0;
+				   data.noStatus = noStatus;
+
+					if (!growbuffer_append(&(data.gb), fitsdata, fitslen)) {
+						fprintf(stderr, "\nERROR: Out of memory while reading "
+								"stdin\n");
+						exit(-1);
+					}
+
+				   data.totalContentLength =
+				   data.totalOriginalContentLength =
+				   data.contentLength =
+				   data.originalContentLength =
+						   fitslen;
+
+				   do {
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
+									 0, &putObjectHandler, &data);
+				   } while (S3_status_is_retryable(statusG) && should_retry());
+
+
+				   if (statusG != S3StatusOK) {
+					   printf("ERROR ON PUT OBJECT %s\n", fitsname);
+				   }
+
+				   growbuffer_destroy(data.gb);
+
+
+				   memset(fitsdata, 0x0, fitslen * sizeof(char));
+				   filterbank2fits(fitsdata, snapoff, candwidth, input->nsamples, input->currentstartchan + finechannel, offsourcesnr, 0.0, offsource);
+				  
+				   if (input->folder != NULL) {
+				   		sprintf(fitsname, "%s/%s_%5.5f_%ld_OFF.fits", input->folder,input->source_name, input->tstart, input->currentstartchan +finechannel);
+				   } else {
+				   		sprintf(fitsname, "%s_%5.5f_%ld_OFF.fits", input->source_name, input->tstart,input->currentstartchan + finechannel);
+
+				   }
+	
+	
+	
+
+
+				   data.infile = 0;
+				   data.gb = 0;
+				   data.noStatus = noStatus;
+
+					if (!growbuffer_append(&(data.gb), fitsdata, fitslen)) {
+						fprintf(stderr, "\nERROR: Out of memory while reading "
+								"stdin\n");
+						exit(-1);
+					}
+					
+				   data.totalContentLength =
+				   data.totalOriginalContentLength =
+				   data.contentLength =
+				   data.originalContentLength =
+						   fitslen;
+					
+				   do {
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
+									 0, &putObjectHandler, &data);
+				   } while (S3_status_is_retryable(statusG) && should_retry());
+
+				   if (statusG != S3StatusOK) {
+					   printf("ERROR ON PUT OBJECT %s %s.\n", fitsname, S3_get_status_name(statusG));
+				   }
+
+				   growbuffer_destroy(data.gb);
+				   
+
+				}
+				
+			}
+			
+		
+	
+	
+	free(fitsdata);
+	free(snap);
+	free(snapoff);
+	S3_deinitialize();
+	do_disconnect(&conn);
+
+	
+}	
+
+
+
+
+
+
+long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, struct filterbank_input *offsource) {
+
+	long int i, j, k;
+	long int fitslen;
+	char *fitsdata;
+	FILE *fitsfile;
+	char onfitsname[100];
+	char offfitsname[100];
+	char diskfitsname[200];
+	
+	
+	char candname[150];
+	float *snap;
+	float *snapoff;
+	
+	long int startchan;
+	long int endchan;
+	long int onout;
+	long int offout;
+	
+	char mongoclientstring[1024];
+	int goodcandidate = 0;
+	char query[4096];
+
+   mongoc_client_t      *client;
+   mongoc_database_t    *database;
+   mongoc_collection_t  *collection;
+   bson_t               *command,
+                        *insert;
+   bson_error_t          error;
+   char                 *str;
+
+
+   char *envvar = NULL;
+
+	//char bucketName[255];
+	//sprintf(bucketName, "norwegianfits");
+
+    envvar = getenv("MONGO_CLIENT_STRING");
+    if (!envvar) {
+        fprintf(stderr, "Missing environment variable: MONGO_CLIENT_STRING\n");
+        exit(1);
+    }
+	
+	sprintf(mongoclientstring, "%s", envvar);
+    
+    printf("%s\n",mongoclientstring);
+
+	S3_init();
+	
+	
+	/*
+	 * Required to initialize libmongoc's internals
+	 */
+	mongoc_init ();
+
+	/*
+	 * Create a new client instance
+	 */
+ 	client = mongoc_client_new (mongoclientstring);
+
+	/*
+	 * Register the application name so we can track it in the profile logs
+	 * on the server. This can also be done from the URI (see other examples).
+	 */
+	mongoc_client_set_appname (client, "rt_obs_gb");
+
+	/*
+	 * Get a handle on the database "db_name" and collection "coll_name"
+	 */
+	database = mongoc_client_get_database (client, "observationTracker");
+	collection = mongoc_client_get_collection (client, "observationTracker", "events");
+   	
+   	char cloudbucket[128];
+   	sprintf(cloudbucket,"https://storage.googleapis.com/setidata");
+
+	printf("MongoConnected\n");
+	fflush(stdout);
+
+	
+   
+	long int candwidth;
+	candwidth = input->candwidth;
+	
+    const char *cacheControl = 0, *contentType = 0, *md5 = 0;
+    const char *contentDispositionFilename = 0, *contentEncoding = 0;
+    int64_t expires = -1;
+    int metaPropertiesCount = 0;
+    
+
+
+    
+    
+    S3NameValue metaProperties[S3_MAX_METADATA_COUNT];
+    char useServerSideEncryption = 0;
+    int noStatus = 0;
+
+
+
+
+    put_object_callback_data data;
+
+	S3BucketContext bucketContext =
+    {
+        0,
+        input->bucketname,
+        protocolG,
+        uriStyleG,
+        accessKeyIdG,
+        secretAccessKeyG,
+        0,
+        awsRegionG
+    };
+
+    S3PutProperties putProperties =
+    {
+        contentType,
+        md5,
+        cacheControl,
+        contentDispositionFilename,
+        contentEncoding,
+        expires,
+        cannedAcl,
+        metaPropertiesCount,
+        metaProperties,
+        useServerSideEncryption
+    };
+    
+    S3PutObjectHandler putObjectHandler =
+    {
+        { &responsePropertiesCallback, &responseCompleteCallback },
+        &putObjectDataCallback
+    };
+
+
+			
+	fitslen = 2880 + (candwidth * input->nsamples * 4) + 2880 - ((candwidth * input->nsamples * 4)%2880);
+	
+	fitsdata = (char *) malloc(fitslen);
+	
+	snap = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+	snapoff = (float*) malloc(candwidth * input->nsamples * sizeof(float));
+
+			
+		
+	float drift_rate_resolution = (input->foff * input->nsamples * input->tsamp);
+	float onsourcesnr = 0;
+	float offsourcesnr = 0;
+	double drift = 0;
+	double frequency = 0;
+	long int finechannel = 0;
+			
+
+	
+	for(j=(input->Xpadframes * input->dimY);j<(input->dimX - (input->Xpadframes * input->dimY));j++) {
+
+
+			goodcandidate = 0;
+
+			if (input->maxsnr[j] > thresh) {
+
+				//printf("%s: Cand at frequency: %15.6lf bandwidth: %15.6g %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n", sourcea.filename, filterbank_chan_freq(&sourcea, j-(sourcea.Xpadframes * sourcea.dimY)), sourcea.foff, j, sourcea.dimX, sourcea.maxsnr[j], sourcea.maxdrift[j] * drift_rate_resolution, sourceb.maxsnr[j]);
+
+				onsourcesnr = input->maxsnr[j];
+				offsourcesnr = offsource->maxsnr[j];
+				drift = input->maxdrift[j] * drift_rate_resolution;
+				finechannel = (j-(input->Xpadframes * input->dimY));				
+				frequency = filterbank_chan_freq(input, input->currentstartchan + finechannel);
+				
+				goodcandidate = 1;
+			}
+			
+			if (input->maxsnrrev[j] > thresh) {
+				//printf("%s: Cand at frequency: %15.6lf bandwidth: %15.6g %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n",sourcea.filename, filterbank_chan_freq(&sourcea, j-(sourcea.Xpadframes * sourcea.dimY)), sourcea.foff, j, sourcea.dimX, sourcea.maxsnrrev[j], sourcea.maxdrift[j] * drift_rate_resolution * -1, sourceb.maxsnrrev[j]);
+	
+				onsourcesnr = input->maxsnrrev[j];
+				offsourcesnr = offsource->maxsnrrev[j];
+				drift = input->maxdriftrev[j] * drift_rate_resolution * -1;
+				finechannel = (j-(input->Xpadframes * input->dimY));				
+				frequency = filterbank_chan_freq(input, input->currentstartchan + finechannel);
+				goodcandidate = 1;
+			}
+		 
+		 
+		 if(goodcandidate == 1) {
+		 	startchan = finechannel - candwidth/2;
+			endchan = finechannel + candwidth/2;
+		 
+		 
+				memset(snap, 0x0, candwidth * input->nsamples * sizeof(float));
+				memset(snapoff, 0x0, candwidth * input->nsamples * sizeof(float));
+
+
+				onout = filterbank_extract_from_buffer(snap, 0, input->nsamples, startchan, endchan, input);
+				offout = filterbank_extract_from_buffer(snapoff, 0, offsource->nsamples, startchan, endchan, offsource);
+					
+				
+			
+			  sprintf(query, 
+				  "{\"observationId\":\"%s\","  	
+				  "\"snr\":%f," 
+				  "\"frequency\":%f," 
+				  "\"ra\":%lf," 
+				  "\"dec\":%lf," 
+				  "\"bandwidth\":%lf," 
+				  "\"starName\":\"%s\"," 
+				  "\"driftRate\":%f," 
+				  "\"onImgURI\":\"%s/%s_%5.5f_%ld_ON.png\"," 
+				  "\"offImgURI\":\"%s/%s_%5.5f_%ld_OFF.png\"," 
+				  "\"diffImgURI\":\"%s/%s_%5.5f_%ld_NORM.png\"," 
+				  "\"onFitsURI\":\"%s/%s_%5.5f_%ld.fits\"," 
+				  "\"offFitsURI\":\"%s/%s_%5.5f_%ld_OFF.fits\"}",
+				   input->obsid,
+				   onsourcesnr,
+				   frequency,
+				   input->src_raj,
+				   input->src_dej,
+				   input->foff*1000000*-1,
+				   input->source_name,
+				   drift,
+				   cloudbucket, input->source_name, input->tstart, input->currentstartchan +finechannel,
+				   cloudbucket, input->source_name, input->tstart, input->currentstartchan +finechannel,
+				   cloudbucket, input->source_name, input->tstart, input->currentstartchan +finechannel,
+				   cloudbucket, input->source_name, input->tstart, input->currentstartchan +finechannel,
+				   cloudbucket, input->source_name, input->tstart, input->currentstartchan +finechannel);
+	 
+	 
+	
+				printf("%s\n", query);
+
+
+				//const char *json = "{\"name\": {\"first\":\"Grace\", \"last\":\"Hopper\"}}";
+				
+				insert = bson_new_from_json ((const uint8_t *)query, -1, &error);
+   
+
+				//printf("%s\n", query);
+				
+				   
+				   if (!mongoc_collection_insert (collection, MONGOC_INSERT_NONE, insert, NULL, &error)) {
+					  fprintf (stderr, "%s\n", error.message);
+				   }
+
+
+				   memset(fitsdata, 0x0, fitslen * sizeof(char));
+				   filterbank2fits(fitsdata, snap, candwidth, input->nsamples, input->currentstartchan + finechannel, onsourcesnr, drift, input);
+
+			  	   if (input->folder != NULL) {
+   				   		sprintf(onfitsname, "%s/%s_%5.5f_%ld.fits", input->folder,input->source_name, input->tstart, input->currentstartchan +finechannel);
+				   } else {
+				      	 sprintf(onfitsname, "%s_%5.5f_%ld.fits",input->source_name, input->tstart, input->currentstartchan +finechannel);
+				   }
+				   
+				   sprintf(diskfitsname, "/datax/scratch/real_time_temp/raw/%s", onfitsname);
+				   fitsfile = fopen(diskfitsname, "wb");
+				   fwrite(fitsdata, 1, fitslen, fitsfile);
+				   fclose(fitsfile);
+
+				   
+				   data.infile = 0;
+				   data.gb = 0;
+				   data.noStatus = noStatus;
+
+					if (!growbuffer_append(&(data.gb), fitsdata, fitslen)) {
+						fprintf(stderr, "\nERROR: Out of memory while reading "
+								"stdin\n");
+						exit(-1);
+					}
+
+				   data.totalContentLength =
+				   data.totalOriginalContentLength =
+				   data.contentLength =
+				   data.originalContentLength =
+						   fitslen;
+
+				   do {
+					   S3_put_object(&bucketContext, onfitsname, fitslen, &putProperties, 0,
+									 0, &putObjectHandler, &data);
+				   } while (S3_status_is_retryable(statusG) && should_retry());
+
+
+				   if (statusG != S3StatusOK) {
+					   printf("ERROR ON PUT OBJECT %s\n", onfitsname);
+				   }
+
+				   growbuffer_destroy(data.gb);
+
+
+				   memset(fitsdata, 0x0, fitslen * sizeof(char));
+				   filterbank2fits(fitsdata, snapoff, candwidth, input->nsamples, input->currentstartchan + finechannel, offsourcesnr, 0.0, offsource);
+				  
+				   if (input->folder != NULL) {
+				   		sprintf(offfitsname, "%s/%s_%5.5f_%ld_OFF.fits", input->folder,input->source_name, input->tstart, input->currentstartchan +finechannel);
+				   } else {
+				   		sprintf(offfitsname, "%s_%5.5f_%ld_OFF.fits", input->source_name, input->tstart,input->currentstartchan + finechannel);
+
+				   }
+	
+	
+				   sprintf(diskfitsname, "/datax/scratch/real_time_temp/raw/%s", offfitsname);
+				   fitsfile = fopen(diskfitsname, "wb");
+				   fwrite(fitsdata, 1, fitslen, fitsfile);
+				   fclose(fitsfile);
+	
+
+
+				   data.infile = 0;
+				   data.gb = 0;
+				   data.noStatus = noStatus;
+
+					if (!growbuffer_append(&(data.gb), fitsdata, fitslen)) {
+						fprintf(stderr, "\nERROR: Out of memory while reading "
+								"stdin\n");
+						exit(-1);
+					}
+					
+				   data.totalContentLength =
+				   data.totalOriginalContentLength =
+				   data.contentLength =
+				   data.originalContentLength =
+						   fitslen;
+					
+				   do {
+					   S3_put_object(&bucketContext, offfitsname, fitslen, &putProperties, 0,
+									 0, &putObjectHandler, &data);
+				   } while (S3_status_is_retryable(statusG) && should_retry());
+
+				   if (statusG != S3StatusOK) {
+					   printf("ERROR ON PUT OBJECT %s %s.\n", offfitsname, S3_get_status_name(statusG));
+				   }
+
+				   growbuffer_destroy(data.gb);
+				   
+
+				}
+				
+			}
+			
+		
+	
+	
+	free(fitsdata);
+	free(snap);
+	free(snapoff);
+	S3_deinitialize();
+
+	mongoc_collection_destroy (collection);
+	mongoc_database_destroy (database);
+	mongoc_client_destroy (client);
+	mongoc_cleanup ();
+}	
+
+
+
+
+
+
+
+
+
+
+
 
 
 long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh, struct filterbank_input *input, struct filterbank_input *offsource) {
@@ -560,7 +1228,6 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 				   //fwrite(fitsdata, 1, fitslen, fitsfile);
 				   //fclose(fitsfile);
 				
-
 
 			}
 		}

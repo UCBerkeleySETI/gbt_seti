@@ -31,6 +31,8 @@
 #include <pthread.h>
 #include "filterbank_header.h"
 #include "filterbankutil.h"
+#include <mysql.h>
+#include "setimysql.h"
 
 
 #define MAXBLOCK 1<<28  //Set maximum size of a memory allocation per file
@@ -108,8 +110,8 @@ int main(int argc, char *argv[]) {
 	sourceb.zapwidth = 1;
 	
 
-	sourcea.candwidth = 512;
-	sourceb.candwidth = 512;
+	sourcea.candwidth = 768;
+	sourceb.candwidth = 768;
 
 	sourcea.filename = NULL;
 	sourceb.filename = NULL;
@@ -119,6 +121,8 @@ int main(int argc, char *argv[]) {
 	
 	float zscore = 15;
 
+	sourcea.folder = NULL;
+	sourceb.folder = NULL;
 
 	pthread_t taylor_th0;
 	pthread_t taylor_th1;
@@ -140,7 +144,7 @@ int main(int argc, char *argv[]) {
 	long int i,j,k;
 	opterr = 0;
  
-	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:")) != -1)
+	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:i:")) != -1)
 	  switch (c)
 		{
 		case 'h':
@@ -150,6 +154,10 @@ int main(int argc, char *argv[]) {
 		case 'a':
 		  sourcea.filename = optarg;
 		  break;
+		case 'i':
+		  sourcea.obsid = optarg;
+		  sourceb.obsid = optarg;
+		  break;		  
 		case 'b':
 		  sourceb.filename = optarg;
 		  break;
@@ -181,7 +189,12 @@ int main(int argc, char *argv[]) {
 		  abort ();
 		}
 		
-		
+	if(sourcea.bucketname == NULL || strlen(sourcea.bucketname) < 1) {
+		printf("Invalid bucketname: %s  Specify with -s <bucket_name>.\n", sourcea.bucketname);
+		exit(1);
+	}
+	
+
 		
 	if(!sourcea.filename || !sourceb.filename) {
 		filterbanksearch_print_usage();
@@ -216,6 +229,17 @@ int main(int argc, char *argv[]) {
 	read_filterbank_header(&sourceb);		    
     //fprintf(stderr, "Read and summed %d integrations for sourceb\n", sum_filterbank(&sourceb));
 
+	long int nsamples;
+    if(sourcea.nsamples != sourceb.nsamples) {
+    	
+    	fprintf(stderr, "ERROR: sample count doesn't match %lf ! (sourcea: %ld, sourceb: %ld)\n", sourcea.fch1, sourcea.nsamples, sourceb.nsamples);
+    	nsamples = min(sourcea.nsamples,sourceb.nsamples);
+    	sourcea.nsamples = nsamples;
+    	sourceb.nsamples = nsamples;
+    	fprintf(stderr, "NOW: sample count doesn't match! (sourcea: %ld, sourceb: %ld)\n", sourcea.nsamples, sourceb.nsamples);
+
+    }
+
 
 	fprintf(stderr, "polyphase channels: %ld\n", sourcea.polychannels);
 	fprintf(stderr, "datasize: %ld\n", sourcea.datasize);	    
@@ -236,6 +260,10 @@ int main(int argc, char *argv[]) {
 	sourcea.dimX = (sourcea.nchans/sourcea.polychannels) * channels_to_read + (sourcea.Xpadframes * 2 * sourcea.dimY);
 	sourceb.dimX = sourcea.dimX;
 	
+	sourcea.rawdata = (float*) malloc( sizeof(float)  * (sourcea.nchans/sourcea.polychannels) * channels_to_read * sourcea.nsamples );
+	sourceb.rawdata = (float*) malloc( sizeof(float)  * (sourcea.nchans/sourcea.polychannels) * channels_to_read * sourcea.nsamples );
+
+
 	sourcea.data = (float*) malloc( sizeof(float)  * sourcea.dimX * sourcea.dimY);
 	sourceb.data = (float*) malloc(sizeof(float) * sourcea.dimX * sourcea.dimY);
 
@@ -259,22 +287,6 @@ int main(int argc, char *argv[]) {
 	sourceb.maxdriftrev = (float*) malloc( sizeof(float)  * sourcea.dimX);
 
 
-	memset(sourcea.maxsnr, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourcea.maxdrift, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourcea.maxsnrrev, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourcea.maxdriftrev, 0x0, sizeof(float) * sourcea.dimX);
-
-	memset(sourceb.maxsnr, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourceb.maxdrift, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourceb.maxsnrrev, 0x0, sizeof(float) * sourcea.dimX);
-	memset(sourceb.maxdriftrev, 0x0, sizeof(float) * sourcea.dimX);
-
-
-	memset(sourcea.data, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
-	memset(sourceb.data, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
-
-	memset(sourcea.datarev, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
-	memset(sourceb.datarev, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
 
 
 	fprintf(stderr, "Will process channels: %ld (%ld bytes) at a time\n", channels_to_read, (sourcea.nchans/sourcea.polychannels) * sizeof(float) * channels_to_read * sourcea.dimY);		    
@@ -331,16 +343,29 @@ int main(int argc, char *argv[]) {
 
 
 	float drift_rate_resolution;
-	drift_rate_resolution = (1000000.0 * sourcea.nsamples * sourcea.tsamp); // Hz/sec - guppi chan bandwidth is in MHz
+	drift_rate_resolution = (sourcea.foff * sourcea.nsamples * sourcea.tsamp); // Hz/sec - guppi chan bandwidth is in MHz
+
+
 
 	for(i=0;i<sourcea.polychannels;i=i+channels_to_read){	
 
-
+		sourcea.currentstartchan = (sourcea.nchans/sourcea.polychannels) * i;
+		
 		fprintf(stderr,"%ld read!\n",i);
 		fflush(stderr);	
 		
-		filterbank_extract_from_file(sourcea.data, 0, sourcea.nsamples, (sourcea.nchans/sourcea.polychannels) * i,(sourcea.nchans/sourcea.polychannels) * i + (sourcea.nchans/sourcea.polychannels) * channels_to_read , &sourcea);
-		filterbank_extract_from_file(sourceb.data, 0, sourcea.nsamples, (sourcea.nchans/sourcea.polychannels) * i,(sourcea.nchans/sourcea.polychannels) * i + (sourcea.nchans/sourcea.polychannels) * channels_to_read , &sourceb);	
+		filterbank_extract_from_file(sourcea.rawdata, 0, sourcea.nsamples, (sourcea.nchans/sourcea.polychannels) * i,(sourcea.nchans/sourcea.polychannels) * i + (sourcea.nchans/sourcea.polychannels) * channels_to_read , &sourcea);
+		filterbank_extract_from_file(sourceb.rawdata, 0, sourcea.nsamples, (sourcea.nchans/sourcea.polychannels) * i,(sourcea.nchans/sourcea.polychannels) * i + (sourcea.nchans/sourcea.polychannels) * channels_to_read , &sourceb);	
+		
+		memset(sourcea.data, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
+		memset(sourceb.data, 0x0, sizeof(float) * sourcea.dimX * sourcea.dimY);
+	
+		for(j=0;j<sourcea.nsamples;j++) {
+			memcpy(sourcea.data + (j*sourcea.dimX) + (sourcea.dimY*sourcea.Xpadframes), sourcea.rawdata + (j * (sourcea.nchans/sourcea.polychannels) * channels_to_read), (sourcea.nchans/sourcea.polychannels) * channels_to_read * sizeof(float));
+			memcpy(sourceb.data + (j*sourcea.dimX) + (sourcea.dimY*sourcea.Xpadframes), sourceb.rawdata + (j * (sourcea.nchans/sourceb.polychannels) * channels_to_read), (sourcea.nchans/sourcea.polychannels) * channels_to_read * sizeof(float));
+		}
+		
+		
 		
 		fprintf(stderr,"%ld read!\n",i);
 		fflush(stderr);	
@@ -372,6 +397,12 @@ int main(int argc, char *argv[]) {
 		pthread_join(taylor_th3, NULL);
 		
 		fprintf(stderr,"%ld doppler!\n",i);	
+
+
+//		for(j=0;j<;j++) {
+//			memcpy(sourcea.data + (j*(sourcea.dimY*sourcea.Xpadframes*2 + sourcea.dimX)) + (sourcea.dimY*sourcea.Xpadframes), sourcea.rawdata + (j * (sourcea.nchans/sourcea.polychannels) * channels_to_read), (sourcea.nchans/sourcea.polychannels) * channels_to_read * sizeof(float));
+//			memcpy(sourceb.data + (j*(sourcea.dimY*sourcea.Xpadframes*2 + sourcea.dimX)) + (sourcea.dimY*sourcea.Xpadframes), sourceb.rawdata + (j * (sourcea.nchans/sourceb.polychannels) * channels_to_read), (sourcea.nchans/sourcea.polychannels) * channels_to_read * sizeof(float));
+//		}
 
 
 /*	
@@ -419,12 +450,75 @@ int main(int argc, char *argv[]) {
 		pthread_join(diff_th2, NULL);
 		pthread_join(diff_th3, NULL);
 
+		FlipX(sourcea.maxsnrrev, sourcea.dimX, 1);
+		FlipX(sourcea.maxdriftrev, sourcea.dimX, 1);
+		FlipX(sourceb.maxsnrrev, sourcea.dimX, 1);
+		FlipX(sourceb.maxdriftrev, sourcea.dimX, 1);
+		
+		for(j=(sourcea.Xpadframes * sourcea.dimY);j<(sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));j++) {
+			
+			if (sourcea.maxsnr[j] > 0) {
 
+				/* higher SNR hit at a nearby time */
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(j != k && sourcea.maxsnr[k] > sourcea.maxsnr[j]) sourcea.maxsnr[j] = 0;
+				}
+			
+				/* higher SNR hit in the neg drift search at a nearby time */
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourcea.maxsnrrev[k] > sourcea.maxsnr[j]) sourcea.maxsnr[j] = 0;
+				}
 
+				/* hit in the off-source at a nearby time*/
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourceb.maxsnr[k] > 0) sourcea.maxsnr[j] = 0;
+				}								
 
-		for(j=(sourcea.Xpadframes * sourcea.dimY);j<(sourcea.dimX - (2 * sourcea.Xpadframes * sourcea.dimY));j++) {
-			if (sourcea.maxsnr[j] > 0) printf("Cand at %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n", j, sourcea.dimX, sourcea.maxsnr[j], sourcea.maxdrift[j] * drift_rate_resolution, sourceb.maxsnr[j]);
+				/* hit in the off-source neg drift at a nearby time*/
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourceb.maxsnrrev[k] > 0) sourcea.maxsnr[j] = 0;
+				}								
+	
+				if(fabsf(sourcea.maxsnrrev[j] - sourcea.maxsnr[j]) < 0.001) sourcea.maxsnr[j] = 0;
+							
+			}
+			
+			if (sourcea.maxsnrrev[j] > 0) {
+
+				/* higher SNR hit at a nearby time */
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(j != k && sourcea.maxsnrrev[k] > sourcea.maxsnrrev[j]) sourcea.maxsnrrev[j] = 0;
+				}
+			
+				/* higher SNR hit in the pos drift search at a nearby time */
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourcea.maxsnr[k] > sourcea.maxsnrrev[j]) sourcea.maxsnrrev[j] = 0;
+				}
+
+				/* hit in the off-source at a nearby time*/
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourceb.maxsnrrev[k] > 0) sourcea.maxsnrrev[j] = 0;
+				}								
+
+				/* hit in the off-source neg drift at a nearby time*/
+				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
+				   if(sourceb.maxsnr[k] > 0) sourcea.maxsnrrev[j] = 0;
+				}								
+
+			
+			}
+			
+			
 		}
+
+
+		candsearch_doppler_mongo(40, &sourcea, &sourceb);
+		//candsearch_doppler(20, &sourcea, &sourceb);
+
+
+		//for(j=(sourcea.Xpadframes * sourcea.dimY);j<(sourcea.dimX - (2 * sourcea.Xpadframes * sourcea.dimY));j++) {
+		//	if (sourcea.maxsnr[j] > 0) printf("Cand at %ld of %ld: onsource snr: %g drift: %g Hz/sec off source snr: %g\n", j, sourcea.dimX, sourcea.maxsnr[j], sourcea.maxdrift[j] * drift_rate_resolution, sourceb.maxsnr[j]);
+		//}
 
 
 
@@ -453,9 +547,7 @@ int main(int argc, char *argv[]) {
 
 	//memset(diff_spectrum, 0x0, sourcea.nchans * sizeof(float));
 
-    if(sourcea.nsamples != sourceb.nsamples) {
-    	fprintf(stderr, "ERROR: sample count doesn't match! (sourcea: %ld, sourceb: %ld)\n", sourcea.nsamples, sourceb.nsamples);
-    }
+
 
     long int candwidth;
     long int hitchan;
@@ -670,6 +762,8 @@ void diff_search_thread(void *ptr) {
 
 	for(i=0;i<(dimX*dimY);i++){
 		result[i] = (onsource[i] - offsource[i]) / offsource[i];
+		//result[i] = onsource[i];
+		
 		if(isnan(result[i]) || isinf(result[i])) result[i] = 0;
 	}
 	

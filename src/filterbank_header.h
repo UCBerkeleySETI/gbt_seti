@@ -44,9 +44,10 @@ struct filterbank_input {
 	long int polychannels;  //Number of polyphase channels in the file
 	long int candwidth;
 	long int zapwidth;
+	long int currentstartchan;
 
 
-
+	float *rawdata;
 	float *data;
     float *datarev;
     float *result;
@@ -64,6 +65,7 @@ struct filterbank_input {
 	FILE *candfile;
 	char *bucketname;
 	char *folder;
+ 	char *obsid;
 	MYSQL *conn;
 };
 

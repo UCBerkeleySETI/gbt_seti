@@ -93,6 +93,7 @@ extern void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltag
 extern void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+extern void detectV_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern void setQuant(float *lut);
 extern void setQuant8(float *lut);
 extern void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
@@ -1136,7 +1137,9 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 					detectY_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
 			} else if (gpu_spec[i].pol == 0) {
 					detectX_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
-			}			
+			} else if (gpu_spec[i].pol == 3) {	
+				    detectV_wrapper(gpu_spec[i].b_d, nsamples * nchannels, gpu_spec[i].cufftN, gpu_spec[i].bandpassd, gpu_spec[i].spectrumd);
+			}	
 			
 
 			gpu_spec[i].spectracnt++; 

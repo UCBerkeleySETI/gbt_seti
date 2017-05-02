@@ -18,6 +18,7 @@ extern "C" void explode_wrapper(unsigned char *channelbufferd, cufftComplex * vo
 extern "C" void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern "C" void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern "C" void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+extern "C" void detectV_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern "C" void setQuant(float *lut);
 extern "C" void setQuant8(float *lut);
 extern "C" void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
@@ -120,6 +121,28 @@ __global__ void detect(cufftComplex * voltages, int veclen, int fftlen, float * 
 	 }
 }
 
+/* Detect Stokes V - Uncalibrated - AHHHHHH! */
+__global__ void detectV(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
+
+
+	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
+	int tid = blockId * blockDim.x + threadIdx.x;
+
+	int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
+
+/* 2 * ( Re(Ey) * Im(Ex) - Re(Ex) * Im(Ey) )  */
+
+	 if(tid < veclen) {
+		  spectrumd[tid] = spectrumd[tid] + 2 * ((voltages[veclen + indx].x * voltages[indx].y) - (voltages[indx].x * voltages[veclen + indx].y));	 		  
+	 }
+}
+
+
+
+
+
+
+
 __global__ void detectX(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
 
 	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
@@ -134,6 +157,8 @@ __global__ void detectX(cufftComplex * voltages, int veclen, int fftlen, float *
 		  spectrumd[tid] = spectrumd[tid] + ((voltages[indx].x * voltages[indx].x) + (voltages[indx].y * voltages[indx].y));	 		  
 	 }
 }
+
+
 __global__ void detectY(cufftComplex * voltages, int veclen, int fftlen, float * bandpassd, float * spectrumd) {
 
 	int blockId   = blockIdx.y * gridDim.x + blockIdx.x;			 	
@@ -148,6 +173,10 @@ int indx = tid - (tid%fftlen) + (tid + fftlen/2)%fftlen;
 		  spectrumd[tid] = spectrumd[tid] + ((voltages[veclen + indx].x * voltages[veclen + indx].x)+ (voltages[veclen + indx].y * voltages[veclen + indx].y));	 		  
 	 }
 }
+
+
+
+
 
 
 __global__ void normalize(float * tree_dedopplerd_pntr, int tdwidth)  {
@@ -207,6 +236,14 @@ void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *ban
 	dim3 nblocks((veclen+2047)/2048, 4);
 
 	detectY<<<nblocks,nthreads>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
+}
+
+void detectV_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd) {
+
+	int nthreads = 512;
+	dim3 nblocks((veclen+2047)/2048, 4);
+
+	detectV<<<nblocks,nthreads>>>(voltages, veclen, fftlen, bandpassd, spectrumd);
 }
 
 //veclen is number of complex elements, so length of channelbufferd is 4 x veclen
