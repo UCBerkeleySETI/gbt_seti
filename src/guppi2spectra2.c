@@ -1,6 +1,7 @@
 #define MAXSIZE 134000000
 #define RING_ELEMENTS 8
 #define SPINFILE "/home/obs/triggers/gpuspec_spin"
+#define _GNU_SOURCE
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,17 +10,20 @@
 #include <ctype.h>
 #include <unistd.h>
 #include <semaphore.h>
+#include <sched.h>
+#include <sys/stat.h>
+#include <pthread.h>
+
+#include "cuda.h"
+#include "cuda_runtime_api.h"
+#include "cufft.h"
+
 
 #include "fitsio.h"
 #include "psrfits.h"
 #include "guppi_params.h"
 #include "fitshead.h"
-#include <sys/stat.h>
-#include "cufft.h"
 #include "guppi2spectra_gpu.h"
-#include "cuda.h"
-#include "cuda_runtime_api.h"
-#include <pthread.h>
 #include "filterbank.h"
 #include "fcntl.h"
 
@@ -75,11 +79,6 @@ struct gpu_input {
 
 
 
-		
-long int simple_fits_buf(char * fitsdata, float *vec, int height, int width, double fcntr, long int fftlen, double snr, double doppler, struct gpu_input *firstinput);
-		
-long int extension_fits_buf(char * fitsdata, float *vec, int height, int width, double fcntr, long int fftlen, double snr, double doppler, struct gpu_input *firstinput);
-
 /* prototypes */
 
 float log2f(float x);
@@ -131,6 +130,7 @@ struct gpu_spectrometer {
 	 int nspec;
 	 FILE *filterbank_file;
 	 char filename[255];
+	 int num_cores;
 };
 
 
@@ -151,10 +151,8 @@ void accumulate_write_single(void *ptr);
 
 void raw_read_ring(void *ptr);
 
-double chan_freq(struct gpu_input *firstinput, long long int fftlen, long int coarse_channel, long int fine_channel, long int tdwidth, int ref_frame);
 
 
-void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channels, double fcntr, double deltaf, double deltat, struct guppi_params *g, struct psrfits *p, double snr, double doppler);
 
 
 void *readbin(void * arg);
@@ -246,7 +244,10 @@ int main(int argc, char *argv[]) {
 	   /* set default polarization mode (2 == Stokes I) */
 	   for(i=0;i<4;i++){ gpu_spec[i].pol = 2; }
 	
-    
+	
+	   for(i=0;i<4;i++){ gpu_spec[i].num_cores = sysconf(_SC_NPROCESSORS_ONLN); }
+   	
+   	
 	   if(argc < 2) {
 		   print_usage(argv);
 		   exit(1);
@@ -1156,244 +1157,6 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 
 
-double chan_freq(struct gpu_input *firstinput, long long int fftlen, long int coarse_channel, long int fine_channel, long int tdwidth, int ref_frame) {
-
-	double center_freq = firstinput->pf.hdr.fctr;
-	double channel_bw = firstinput->pf.hdr.df;
-	double band_size = firstinput->pf.hdr.BW;
-	double adj_channel_bw = channel_bw + (((tdwidth-fftlen) / fftlen) * channel_bw);
-	double adj_fftlen = tdwidth;
-	double chanfreq = 0;
-	double bandpad = (((tdwidth-fftlen) / fftlen) * channel_bw);
-	//chan_freq = center_freq - (band_size/2) + ((double) coarse_channel * channel_bw) - bandpad
-
-	/* determing channel frequency from fine and coarse bins */
-	chanfreq = (center_freq - (band_size/2)) + (((double) fine_channel * adj_channel_bw)/((double) adj_fftlen)) + ((double) coarse_channel * channel_bw) - (bandpad/2);
-
-	/* apply doppler correction */
-	if(ref_frame == 1) chanfreq = (1 - firstinput->baryv) * chanfreq;
-
-	return chanfreq;
-
-}
-
-long int extension_fits_buf(char * fitsdata, float *vec, int height, int width, double fcntr, long int fftlen, double snr, double doppler, struct gpu_input *firstinput)
-{
-
-char * buf;
-long int i,j,k;
-long int fitslen=0;
-buf = (char *) malloc(2880 * sizeof(char));
-/* zero out header */
-memset(buf, 0x0, 2880);
-
-	strcpy (buf, "END ");
-	for(i=4;i<2880;i++) buf[i] = ' ';
-
-	hlength (buf, 2880);
-
-
-
-	hadd(buf, "SOURCE");
-	hadd(buf, "SNR");
-	hadd(buf, "DOPPLER");
-	hadd(buf, "RA");
-	hadd(buf, "DEC");
-	hadd(buf, "TOFFSET");
-	hadd(buf, "FCNTR");
-	hadd(buf, "DELTAF");
-	hadd(buf, "DELTAT");
-	hadd(buf, "GCOUNT");
-	hadd(buf, "PCOUNT");
-	hadd(buf, "NAXIS2");
-	hadd(buf, "NAXIS1");
-	hadd(buf, "NAXIS");
-	hadd(buf, "BITPIX");
-	hadd(buf, "XTENSION");
-
-
-	hputs(buf, "XTENSION", "IMAGE");
-	hputi4(buf, "BITPIX", -32);
-	hputi4(buf, "NAXIS", 2);
-	hputi4(buf, "NAXIS1", width);
-	hputi4(buf, "NAXIS2", height);
-	hputi4(buf, "GCOUNT", 1);
-	hputi4(buf, "PCOUNT", 1);
-
-	hputnr8(buf, "FCNTR", 12, fcntr);
-	hputnr8(buf, "DELTAF", 12, (double) firstinput->pf.hdr.df/fftlen);
-	hputnr8(buf, "DELTAT", 12, (double) fftlen/(1000000 * firstinput->pf.hdr.df));
-
-	hputnr8(buf, "TOFFSET", 12, (double) (firstinput->pf.sub.offs) );
-	hputnr8(buf, "RA", 12, firstinput->pf.sub.ra);
-	hputnr8(buf, "DEC", 12, firstinput->pf.sub.dec);
-	hputnr8(buf, "DOPPLER", 12, doppler);
-	hputnr8(buf, "SNR", 12, snr);
-	hputs(buf, "SOURCE", firstinput->pf.hdr.source);
-
-	memcpy(fitsdata, buf, 2880 * sizeof(char));
-	fitslen = fitslen + 2880;
-	imswap4((char *) vec,(height * width) * 4);
-	
-	memcpy(fitsdata+2880, vec, (height * width) * 4);
-	fitslen = fitslen + (height * width * 4);
-	/* create zero pad buffer */
-	memset(buf, 0x0, 2880);
-	for(i=0;i<2880;i++) buf[i] = ' ';
-		
-	memcpy(fitsdata + 2880 + (height * width * 4), buf, 2880 - ((height*width*4)%2880));
-	fitslen = fitslen + 2880 - ((height*width*4)%2880);
-	free(buf);
-	return fitslen;
-}
-
-
-
-long int simple_fits_buf(char * fitsdata, float *vec, int height, int width, double fcntr, long int fftlen, double snr, double doppler, struct gpu_input *firstinput)
-{
-
-char * buf;
-long int i,j,k;
-long int fitslen=0;
-buf = (char *) malloc(2880 * sizeof(char));
-/* zero out header */
-memset(buf, 0x0, 2880);
-
-	strcpy (buf, "END ");
-	for(i=4;i<2880;i++) buf[i] = ' ';
-
-	hlength (buf, 2880);			 
-
-
-	hadd(buf, "SOURCE");
-	hadd(buf, "SNR");
-	hadd(buf, "DOPPLER");
-	hadd(buf, "RA");
-	hadd(buf, "DEC");
-	hadd(buf, "MJD");
-	hadd(buf, "FCNTR");
-	hadd(buf, "DELTAF");
-	hadd(buf, "DELTAT");
-	hadd(buf, "EXTEND");
-	hadd(buf, "NAXIS2");
-	hadd(buf, "NAXIS1");
-	hadd(buf, "NAXIS");
-	hadd(buf, "BITPIX");
-	hadd(buf, "SIMPLE");
-		
-	hputc(buf, "SIMPLE", "T");
-	hputi4(buf, "BITPIX", -32);
-	hputi4(buf, "NAXIS", 2);
-	hputi4(buf, "NAXIS1", width);
-	hputi4(buf, "NAXIS2", height);
-	hputc(buf, "EXTEND", "T");
-
-	hputnr8(buf, "FCNTR", 12, fcntr);
-	hputnr8(buf, "DELTAF", 12, (double) firstinput->pf.hdr.df/fftlen);
-	hputnr8(buf, "DELTAT", 12, (double) fftlen/(1000000 * firstinput->pf.hdr.df));
-
-	hputnr8(buf, "MJD", 12, (double) firstinput->pf.hdr.MJD_epoch + (double) (firstinput->pf.sub.offs/86400.00) );
-	hputnr8(buf, "RA", 12, firstinput->pf.sub.ra);
-	hputnr8(buf, "DEC", 12, firstinput->pf.sub.dec);
-	hputnr8(buf, "DOPPLER", 12, doppler);
-	hputnr8(buf, "SNR", 12, snr);
-	hputs(buf, "SOURCE", firstinput->pf.hdr.source);
-
-	memcpy(fitsdata, buf, 2880 * sizeof(char));
-	fitslen = fitslen + 2880;
-	imswap4((char *) vec,(height * width) * 4);
-	
-	memcpy(fitsdata+2880, vec, (height * width) * 4);
-	fitslen = fitslen + (height * width * 4);
-	/* create zero pad buffer */
-	memset(buf, 0x0, 2880);
-	for(i=0;i<2880;i++) buf[i] = ' ';
-		
-	memcpy(fitsdata + 2880 + (height * width * 4), buf, 2880 - ((height*width*4)%2880));
-	fitslen = fitslen + 2880 - ((height*width*4)%2880);
-	free(buf);
-	return fitslen;
-}
-
-
-
-void simple_fits_write (FILE *fp, float *vec, int tsteps_valid, int freq_channels, double fcntr, double deltaf, double deltat, struct guppi_params *g, struct psrfits *p, double snr, double doppler)
-{
-
-	char buf[2880];
-	long int bytes_written=0;
-	long int i;
-	/* zero out header */
-	memset(buf, 0x0, 2880);
-
-	
-	strcpy (buf, "END ");
-	for(i=4;i<2880;i++) buf[i] = ' ';
-
-	hlength (buf, 2880);
-
-	
-	hadd(buf, "SOURCE");
-	hadd(buf, "SNR");
-	hadd(buf, "DOPPLER");
-	hadd(buf, "RA");
-	hadd(buf, "DEC");
-	hadd(buf, "MJD");
-	hadd(buf, "FCNTR");
-	hadd(buf, "DELTAF");
-	hadd(buf, "DELTAT");
-	hadd(buf, "NAXIS2");
-	hadd(buf, "NAXIS1");
-	hadd(buf, "NAXIS");
-	hadd(buf, "BITPIX");
-	hadd(buf, "SIMPLE");
-
-	hputc(buf, "SIMPLE", "T");
-	hputi4(buf, "BITPIX", -32);
-	hputi4(buf, "NAXIS", 2);
-	hputi4(buf, "NAXIS1", freq_channels);
-	hputi4(buf, "NAXIS2", tsteps_valid);
-	hputnr8(buf, "FCNTR", 12, fcntr);
-	hputnr8(buf, "DELTAF", 12, deltaf);
-	hputnr8(buf, "DELTAT", 12, deltat);
-
-	hputnr8(buf, "MJD", 12, (double) p->hdr.MJD_epoch);
-	hputnr8(buf, "RA", 12, p->sub.ra);
-	hputnr8(buf, "DEC", 12, p->sub.dec);
-	hputnr8(buf, "DOPPLER", 12, doppler);
-	hputnr8(buf, "SNR", 12, snr);
-	hputc(buf, "SOURCE", p->hdr.source);
-	
-		printf("set keywords %ld\n",bytes_written);  //write header
-
-	bytes_written = bytes_written + fwrite(buf, sizeof(char), 2880, fp);
-	printf("wrote: %ld\n",bytes_written);  //write header
-
-	imswap4((char *) vec,(tsteps_valid * freq_channels) * 4);
-
-	bytes_written = bytes_written + fwrite(vec, sizeof(float), tsteps_valid * freq_channels, fp);
-	printf("wrote: %ld\n",bytes_written);  //write header
-
-	/* create zero pad buffer */
-	memset(buf, 0x0, 2880);
-	for(i=4;i<2880;i++) buf[i] = ' ';
-
-
-	bytes_written = bytes_written + fwrite(buf, sizeof(char), 2880 - ((tsteps_valid * freq_channels*4)%2880), fp);
-
-	printf("wrote: %ld\n",bytes_written);  //write header
-
-
-}
-
-
-
-
-
-
-
-
-
 
 
 void filterbank_header(FILE *outptr) /* includefile */
@@ -1912,6 +1675,14 @@ gpu_spec->rawinput->doneflag = 1;
 sem_post(&(gpu_spec->rawinput->countsem));
 pthread_mutex_unlock(&(gpu_spec->rawinput->donelock));
 
-
 }
 
+int stick_this_thread_to_core(int core_id) {
+
+   cpu_set_t cpuset;
+   CPU_ZERO(&cpuset);
+   CPU_SET(core_id, &cpuset);
+
+   pthread_t current_thread = pthread_self();    
+   return pthread_setaffinity_np(current_thread, sizeof(cpu_set_t), &cpuset);
+}

@@ -512,7 +512,7 @@ int main(int argc, char *argv[]) {
 		}
 
 
-		candsearch_doppler_mongo(40, &sourcea, &sourceb);
+		candsearch_doppler_mongo(zscore + 5, &sourcea, &sourceb);
 		//candsearch_doppler(20, &sourcea, &sourceb);
 
 
