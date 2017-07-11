@@ -124,6 +124,9 @@ int main(int argc, char *argv[]) {
 	sourcea.folder = NULL;
 	sourceb.folder = NULL;
 
+	sourcea.diskfolder = NULL;
+	sourceb.diskfolder = NULL;
+
 	pthread_t taylor_th0;
 	pthread_t taylor_th1;
 	pthread_t taylor_th2;
@@ -157,7 +160,10 @@ int main(int argc, char *argv[]) {
 		case 'i':
 		  sourcea.obsid = optarg;
 		  sourceb.obsid = optarg;
-		  break;		  
+		  break;
+		case 'l':
+		  sourcea.diskfolder = optarg;
+		  sourceb.diskfolder = optarg;		  
 		case 'b':
 		  sourceb.filename = optarg;
 		  break;

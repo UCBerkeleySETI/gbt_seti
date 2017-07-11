@@ -65,6 +65,7 @@ struct filterbank_input {
 	FILE *candfile;
 	char *bucketname;
 	char *folder;
+	char *diskfolder;
  	char *obsid;
 	MYSQL *conn;
 };

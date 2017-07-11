@@ -873,12 +873,14 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 				   } else {
 				      	 sprintf(onfitsname, "%s_%5.5f_%ld.fits",input->source_name, input->tstart, input->currentstartchan +finechannel);
 				   }
-				   
-				   sprintf(diskfitsname, "/datax/scratch/real_time_temp/raw/%s", onfitsname);
-				   fitsfile = fopen(diskfitsname, "wb");
-				   fwrite(fitsdata, 1, fitslen, fitsfile);
-				   fclose(fitsfile);
-
+				  
+ 				   if (input->diskfolder != NULL) {
+ 
+					   sprintf(diskfitsname, "%s/%s", input->diskfolder, onfitsname);
+					   fitsfile = fopen(diskfitsname, "wb");
+					   fwrite(fitsdata, 1, fitslen, fitsfile);
+					   fclose(fitsfile);
+				  }
 				   
 				   data.infile = 0;
 				   data.gb = 0;
@@ -920,11 +922,13 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 				   }
 	
 	
-				   sprintf(diskfitsname, "/datax/scratch/real_time_temp/raw/%s", offfitsname);
-				   fitsfile = fopen(diskfitsname, "wb");
-				   fwrite(fitsdata, 1, fitslen, fitsfile);
-				   fclose(fitsfile);
-	
+                                   if (input->diskfolder != NULL) {
+
+                                           sprintf(diskfitsname, "%s/%s", input->diskfolder, onfitsname);
+                                           fitsfile = fopen(diskfitsname, "wb");
+                                           fwrite(fitsdata, 1, fitslen, fitsfile);
+                                           fclose(fitsfile);
+                                  }	
 
 
 				   data.infile = 0;
