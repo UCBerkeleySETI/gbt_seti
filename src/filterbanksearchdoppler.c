@@ -147,7 +147,7 @@ int main(int argc, char *argv[]) {
 	long int i,j,k;
 	opterr = 0;
  
-	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:i:")) != -1)
+	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:i:l:w:")) != -1)
 	  switch (c)
 		{
 		case 'h':
@@ -155,17 +155,22 @@ int main(int argc, char *argv[]) {
 		  exit(0);
 		  break;
 		case 'a':
-		  sourcea.filename = optarg;
+		  sourcea.filename = strdup(optarg);
 		  break;
 		case 'i':
-		  sourcea.obsid = optarg;
-		  sourceb.obsid = optarg;
+		  sourcea.obsid = strdup(optarg);
+		  sourceb.obsid = sourcea.obsid;
 		  break;
+		case 'w':
+		  sourcea.candwidth = atoi(optarg);
+		  sourceb.candwidth = sourcea.candwidth;
+                  break;
 		case 'l':
-		  sourcea.diskfolder = optarg;
-		  sourceb.diskfolder = optarg;		  
+		  sourcea.diskfolder = strdup(optarg);
+		  sourceb.diskfolder = sourcea.diskfolder;		  
+		  break;
 		case 'b':
-		  sourceb.filename = optarg;
+		  sourceb.filename = strdup(optarg);
 		  break;
 		case 'd':
 		  dopplersearchmode = 1;
@@ -174,12 +179,12 @@ int main(int argc, char *argv[]) {
 		  zscore = (float) atof(optarg);
 		  break;
 		case 's':
-		  sourcea.bucketname = optarg;
-		  sourceb.bucketname = optarg;
+		  sourcea.bucketname = strdup(optarg);
+		  sourceb.bucketname = sourcea.bucketname;
 		  break;
 		case 'f':
-		  sourcea.folder = optarg;
-		  sourceb.folder = optarg;
+		  sourcea.folder = strdup(optarg);
+		  sourceb.folder = sourcea.folder;
 		  break;
 		case '?':
 		  if (optopt == 'i' || optopt == 'o' || optopt == '1' || optopt == '2' || optopt == '3' || optopt == '4' || optopt == '5' || optopt == '6'|| optopt == '7' || optopt == '8')

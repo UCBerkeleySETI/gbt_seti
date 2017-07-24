@@ -823,8 +823,8 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 				  "{\"observationId\":\"%s\","  	
 				  "\"snr\":%f," 
 				  "\"frequency\":%f," 
-				  "\"ra\":%lf," 
-				  "\"dec\":%lf," 
+				  "\"ra\":\"%09.2lf\"," 
+				  "\"dec\":\"%09.2lf\"," 
 				  "\"bandwidth\":%lf," 
 				  "\"starName\":\"%s\"," 
 				  "\"driftRate\":%f," 
@@ -836,8 +836,8 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 				   input->obsid,
 				   onsourcesnr,
 				   frequency,
-				   input->src_raj,
-				   input->src_dej,
+				   input->src_raj + 0.1, //The '+ 0.1' has been added here to mitigate a fatal error
+				   input->src_dej + 0.1, //in the obs-tracker package - A.P.V.S. July 21, 2017
 				   input->foff*1000000*-1,
 				   input->source_name,
 				   drift,
@@ -924,7 +924,7 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 	
                                    if (input->diskfolder != NULL) {
 
-                                           sprintf(diskfitsname, "%s/%s", input->diskfolder, onfitsname);
+                                           sprintf(diskfitsname, "%s/%s", input->diskfolder, offfitsname);
                                            fitsfile = fopen(diskfitsname, "wb");
                                            fwrite(fitsdata, 1, fitslen, fitsfile);
                                            fclose(fitsfile);
