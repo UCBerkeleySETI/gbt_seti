@@ -120,6 +120,7 @@ int main(int argc, char *argv[]) {
 	sourceb.Xpadframes = 4;
 	
 	float zscore = 15;
+	float candidatescore=1000;
 
 	sourcea.folder = NULL;
 	sourceb.folder = NULL;
@@ -147,7 +148,7 @@ int main(int argc, char *argv[]) {
 	long int i,j,k;
 	opterr = 0;
  
-	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:i:l:w:")) != -1)
+	while ((c = getopt (argc, argv, "Vvdhf:b:s:a:s:z:d:i:l:w:c:")) != -1)
 	  switch (c)
 		{
 		case 'h':
@@ -161,10 +162,13 @@ int main(int argc, char *argv[]) {
 		  sourcea.obsid = strdup(optarg);
 		  sourceb.obsid = sourcea.obsid;
 		  break;
+		case 'c':
+		  candidatescore = atof(optarg);
+          break;
 		case 'w':
 		  sourcea.candwidth = atoi(optarg);
 		  sourceb.candwidth = sourcea.candwidth;
-                  break;
+          break;
 		case 'l':
 		  sourcea.diskfolder = strdup(optarg);
 		  sourceb.diskfolder = sourcea.diskfolder;		  
@@ -470,27 +474,31 @@ int main(int argc, char *argv[]) {
 			
 			if (sourcea.maxsnr[j] > 0) {
 
-				/* higher SNR hit at a nearby time */
+				/* higher SNR hit at a nearby frequency - zero out candidate if there is a higher SNR hit within +/- candwidth */
 				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
 				   if(j != k && sourcea.maxsnr[k] > sourcea.maxsnr[j]) sourcea.maxsnr[j] = 0;
 				}
 			
-				/* higher SNR hit in the neg drift search at a nearby time */
+				/* higher SNR hit in the neg drift search at a nearby frequency - same as above, but search the negative drift rates */
 				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
 				   if(sourcea.maxsnrrev[k] > sourcea.maxsnr[j]) sourcea.maxsnr[j] = 0;
 				}
 
-				/* hit in the off-source at a nearby time*/
+				/* hit in the off-source at a nearby frequency */
 				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
 				   if(sourceb.maxsnr[k] > 0) sourcea.maxsnr[j] = 0;
 				}								
 
-				/* hit in the off-source neg drift at a nearby time*/
+				/* hit in the off-source neg drift at a nearby frequency*/
 				for(k = max(0, j - (sourcea.candwidth/2)); k < min(j + (sourcea.candwidth/2), sourcea.dimX - (sourcea.Xpadframes * sourcea.dimY));k++) {
 				   if(sourceb.maxsnrrev[k] > 0) sourcea.maxsnr[j] = 0;
 				}								
 	
+				/* same candidate detected in drift rate = 0 and -0 */
 				if(fabsf(sourcea.maxsnrrev[j] - sourcea.maxsnr[j]) < 0.001) sourcea.maxsnr[j] = 0;
+
+				/* high pass filter method moves candidates by 1 bin */
+				if(fabsf(sourcea.maxsnrrev[j+1] - sourcea.maxsnr[j]) < 0.001) sourcea.maxsnr[j] = 0;
 							
 			}
 			
@@ -523,7 +531,7 @@ int main(int argc, char *argv[]) {
 		}
 
 
-		candsearch_doppler_mongo(zscore + 5, &sourcea, &sourceb);
+		candsearch_doppler_mongo(candidatescore, &sourcea, &sourceb);
 		//candsearch_doppler(20, &sourcea, &sourceb);
 
 
@@ -559,15 +567,6 @@ int main(int argc, char *argv[]) {
 	//memset(diff_spectrum, 0x0, sourcea.nchans * sizeof(float));
 
 
-
-    long int candwidth;
-    long int hitchan;
-    long int left, right;
-    float mean;
-    candwidth = 512;
-    
-    for(i=0;i<sourcea.nchans;i++) diff_spectrum[i] = (sourcea.integrated_spectrum[i] - sourceb.integrated_spectrum[i])/sourceb.integrated_spectrum[i];
-
 /*
 for(i = 0; i < sourcea.nchans; i++) {
 	    if( (i + (sourcea.nchans/sourcea.polychannels)/2)%(sourcea.nchans/sourcea.polychannels) == 0 ) {
@@ -595,10 +594,6 @@ for(i = 0; i < sourcea.nchans; i++) {
 */	
 
 
-
-	normalize(diff_spectrum, (long int) sourcea.nchans);
-
-	candsearch_onoff(diff_spectrum, 512, 5, &sourcea, &sourceb);   
 	
 	
 	
@@ -771,21 +766,35 @@ void diff_search_thread(void *ptr) {
 
 	drift_indexes = diffdata->drift_indexes;
 
+/*
 	for(i=0;i<(dimX*dimY);i++){
-		result[i] = (onsource[i] - offsource[i]) / offsource[i];
+
+		// on - off / off
+		//result[i] = (onsource[i] - offsource[i]) / offsource[i];
+
+
 		//result[i] = onsource[i];
 		
 		if(isnan(result[i]) || isinf(result[i])) result[i] = 0;
 	}
+*/	
 	
+
+
+	/* high pass filter */
+	for(i=0;i<(dimX*dimY);i = i + dimX){
+		for(j=i;j<dimX + i - 1;j++) result[j] = fabsf(onsource[j] - onsource[j+1]);		
+		result[dimX + i - 1] = 0;
+	}
 	
 	//for(i=1000;i<1010;i++) printf("before %g %g %g \n", onsource[i], offsource[i],result[i]);
 
 	for(i=0;i<(dimX*dimY);i = i + dimX) normalize(result + i, dimX);
 
-
 	//for(i=1000;i<1010;i++) printf("after %g %g %g \n", onsource[i], offsource[i],result[i]);
 	
+	/* scan through all hits and note the snr and drift rate of the most significant */
+
 	for(i=0;i<(nsamples);i = i + 1) {
 		indx = drift_indexes[i];
 		//printf("running zscore: %g index: %d...\n", zscore, indx);

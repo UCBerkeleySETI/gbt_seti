@@ -18,6 +18,8 @@ void filterbank2fits(char * fitsdata, float *datavec, int nchan, int nsamp, long
 double filterbank_chan_freq(struct filterbank_input *input, long int channel);
 
 void comp_stats(double *mean, double *stddev, float *vec, long int veclen);
+void comp_stats_mad(double *median, double *mad, float *vec, long int veclen);
+
 
 void normalize (float *vec, long int veclen);
 

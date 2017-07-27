@@ -14,31 +14,36 @@ ON_FILE=$2
 OFF_FILE=$3
 THRESH=$4
 OBSID=$5
+CANDTHRESH=$6
 
 #empty bucket: gsutil -m rm gs://setidata/*
 #/home/siemion/gpu_code/pubsub.sh s --id=MJD_5000.500000
+PNGTEMP=/datax2/users/siemion/real_time_temp
+#DIR=$1/GUPPI/BLP${NODENUM}/blc${NODENUM}
+DIR=$1/blc${NODENUM}
+#rm -rf /datax/scratch/real_time_temp/*
+#mkdir /datax/scratch/real_time_temp/raw
 
-DIR=$1/GUPPI/BLP${NODENUM}/blc${NODENUM}
-
-rm -rf /datax/scratch/real_time_temp/*
-mkdir /datax/scratch/real_time_temp/raw
+rm -rf ${PNGTEMP}/*
+mkdir ${PNGTEMP}/raw
 
 /home/siemion/gpu_code/pubsub.sh r --node=blc${NODENUM} --status=1 --id=${OBSID}
 
-cd ${1}/GUPPI/BLP${NODENUM}
-numactl --cpunodebind 1 /home/obs/bin/gpuspec_wrapper ${ON_FILE}
-numactl --cpunodebind 1 /home/obs/bin/gpuspec_wrapper ${OFF_FILE}
+#cd ${1}/GUPPI/BLP${NODENUM}
+#numactl --cpunodebind 1 /home/obs/bin/gpuspec_wrapper ${ON_FILE}
+#numactl --cpunodebind 1 /home/obs/bin/gpuspec_wrapper ${OFF_FILE}
 
 
 echo ${DIR}
 echo ${DIR}_${ON_FILE}
 echo ${DIR}_${OFF_FILE}
 #guppi_57856_71489_DIAG_W3OH_OFF_0044.gpuspec.0002.fil
-time /home/siemion/sw/dev/gbt_seti/src/filterbanksearchdoppler -a ${DIR}_${ON_FILE}.gpuspec.0000.fil -b ${DIR}_${OFF_FILE}.gpuspec.0000.fil -z ${THRESH} -s setidata -i ${OBSID}
-time /home/siemion/sw/dev/gbt_seti/src/filterbanksearchdoppler -a ${DIR}_${ON_FILE}.gpuspec.0002.fil -b ${DIR}_${OFF_FILE}.gpuspec.0002.fil -z ${THRESH} -s setidata -i ${OBSID}
-cd /datax/scratch/real_time_temp
-python /home/siemion/fits_to_json.py -d /datax/scratch/real_time_temp
-cd /datax/scratch/real_time_temp/processed/img
+time /home/siemion/sw/dev/gbt_seti/src/filterbanksearchdoppler -a ${DIR}_${ON_FILE}.gpuspec.0000.fil -b ${DIR}_${OFF_FILE}.gpuspec.0000.fil -z ${THRESH} -c ${CANDTHRESH} -s setidata -i ${OBSID} -l ${PNGTEMP}/raw -w 512
+# -l ${PNGTEMP}
+#time /home/siemion/sw/dev/gbt_seti/src/filterbanksearchdoppler -a ${DIR}_${ON_FILE}.gpuspec.0002.fil -b ${DIR}_${OFF_FILE}.gpuspec.0002.fil -z ${THRESH} -s setidata -i ${OBSID}
+cd ${PNGTEMP}
+python /home/siemion/fits_to_json.py -d ${PNGTEMP}
+cd ${PNGTEMP}/processed/img
 gsutil -m cp *.png gs://setidata
 /home/siemion/gpu_code/pubsub.sh r --node=blc${NODENUM} --status=2 --id=${OBSID}
 

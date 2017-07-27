@@ -6,6 +6,7 @@
 #include <bson.h>
 #include <bcon.h>
 #include <mongoc.h>
+#include "median.h"
 
 #define max(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a > _b ? _a : _b; })
 #define min(a,b) ({ __typeof__ (a) _a = (a); __typeof__ (b) _b = (b); _a < _b ? _a : _b; })
@@ -115,7 +116,6 @@ void comp_stats(double *mean, double *stddev, float *vec, long int veclen){
 	double tstddev = 0;
 	long int valid_points=0;
 	
-
 	
 	for(i=0;i<veclen;i++) {
 			tmean = tmean + (double) vec[i];
@@ -133,6 +133,39 @@ void comp_stats(double *mean, double *stddev, float *vec, long int veclen){
 
 }
 
+void comp_stats_mad(double *median, double *mad, float *vec, long int veclen){
+
+	//compute mean and MAD of floating point vector vec
+	long int i,j,k;
+	double tmean = 0;
+	double tstddev = 0;
+	long int valid_points=0;
+	float fmedian;
+	float fmad;
+	float *tempvec;
+
+	tempvec = (float *) malloc(veclen * sizeof(float));
+
+	memcpy(tempvec, vec, veclen * sizeof(float));
+
+	fmedian = median(tempvec, veclen);
+	
+	for (i = 0; i < veclen; i++) {
+			tempvec[i] =  fabsf(vec[i] - fmedian);	 	  		
+	}
+
+	fmad = median(tempvec, veclen);		
+	free(tempvec);
+	
+	*median = (double) fmedian;
+	*mad = (double) fmad;
+
+}
+
+
+
+
+
 void normalize (float *vec, long int veclen) {
 
 	double tmpmean;
@@ -145,9 +178,18 @@ void normalize (float *vec, long int veclen) {
 
 	comp_stats(&tmpmean, &tmpstd, vec, veclen);
 
+	tmpmeanf = (float) tmpmean;
+	tmpstdf = (float) tmpstd;
+
+	for(i=1000;i<1002;i++) printf("in normalize MEAN: %g %g %g \n", vec[i], tmpmeanf, tmpstdf);
+
+	comp_stats_mad(&tmpmean, &tmpstd, vec, veclen);
+
 
 	tmpmeanf = (float) tmpmean;
 	tmpstdf = (float) tmpstd;
+
+	for(i=1000;i<1002;i++) printf("in normalize MEDIAN %g %g %g \n", vec[i], tmpmeanf, tmpstdf);
 
 	//for(i=1000;i<1010;i++) printf("innormalize %g %g %g \n", vec[i], tmpmeanf, tmpstdf);
 
