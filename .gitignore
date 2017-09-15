@@ -13,7 +13,11 @@ bin/test_psrfits_read
 bin/treedop
 bin/two2eight
 lib/libsla.so
+src/baryacc
+src/filterbanksearch
+src/filterbanksearchdoppler
 src/gpuspec
+src/gpuspec2
 src/massage_vpm
 src/raw2wu
 src/raw_ascii2
@@ -23,6 +27,7 @@ src/raw_read
 src/rawdopplersearch
 src/rawfilterbank
 src/rawfilterbank_singleband_xy
+src/s3test
 src/tags
 src/test_guppi2spectra
 src/test_psrfits_read
