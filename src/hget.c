@@ -871,8 +871,7 @@ const char *keyword0;   /* character string containing the name of the keyword
                    the n'th token in the value is returned.
                    (the first 8 characters must be unique) */
 {
-    //static char cval[80];
-    char cval[80];
+    static char cval[80];
     char *value;
     char cwhite[2];
     char squot[2], dquot[2], lbracket[2], rbracket[2], slash[2], comma[2];
@@ -1326,7 +1325,7 @@ const char *in; /* Character string of sexigesimal or decimal degrees */
 
 {
     double dec;         /* Declination in degrees (returned) */
-    double deg, min, sec, sign;
+    double deg, min=0, sec, sign;
     char *value, *c1, *c2;
     int lval;
     char *dchar;
