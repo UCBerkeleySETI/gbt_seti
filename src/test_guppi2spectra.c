@@ -4,6 +4,9 @@
 #include "guppi2spectra_gpu.h"
 
 /* Wrapper functions for performing various spectroscopy options on the GPU */
+#ifdef __cplusplus
+extern "C" {
+#endif
 extern void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
 extern void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
 extern void setQuant(float *lut);
@@ -14,6 +17,9 @@ extern void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int 
 extern void explode8init_wrapper(char *channelbufferd, int length);
 extern void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
 extern void explode8lut_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+#ifdef __cplusplus
+}
+#endif
 
 int main(int argc, char *argv[])
 {

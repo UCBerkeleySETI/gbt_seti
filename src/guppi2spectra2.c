@@ -99,19 +99,25 @@ long int lrint(double x);
 
 
 /* Wrapper functions for performing various spectroscopy options on the GPU */
-extern void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
-extern void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
-extern void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
-extern void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
-extern void detectV_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
-extern void setQuant(float *lut);
-extern void setQuant8(float *lut);
-extern void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
-extern void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
-extern void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern void explode8init_wrapper(char *channelbufferd, long int length);
-extern void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
-extern void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
+#ifdef __cplusplus
+extern "C" {
+#endif
+void explode_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
+void detect_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+void detectX_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+void detectY_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+void detectV_wrapper(cufftComplex * voltages, int veclen, int fftlen, float *bandpassd, float *spectrumd);
+void setQuant(float *lut);
+void setQuant8(float *lut);
+void normalize_wrapper(float * tree_dedopplerd_pntr, float *mean, float *stddev, int tdwidth);
+void vecdivide_wrapper(float * spectrumd, float * divisord, int tdwidth);
+void explode8_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+void explode8init_wrapper(char *channelbufferd, long int length);
+void explode8simple_wrapper(char *channelbufferd, cufftComplex * voltages, int veclen);
+void explode8lut_wrapper(unsigned char *channelbufferd, cufftComplex * voltages, int veclen);
+#ifdef __cplusplus
+}
+#endif
 
 /* gpu spectrometer structure */
 /* one of these for each cufft plan that will operate on a block of raw voltage data */

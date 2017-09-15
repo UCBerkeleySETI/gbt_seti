@@ -29,6 +29,11 @@ struct guppi_params {
 
 #include "guppi_udp.h"
 #include "psrfits.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 void guppi_read_obs_mode(const char *buf, char *mode);
 void guppi_read_net_params(char *buf, struct guppi_udp_params *u);
 void guppi_read_subint_params(char *buf, 
@@ -39,4 +44,9 @@ void guppi_read_obs_params(char *buf,
                            struct guppi_params *g, 
                            struct psrfits *p);
 void guppi_free_psrfits(struct psrfits *p);
+
+#ifdef __cplusplus
+}
 #endif
+
+#endif /* _GUPPI_PARAMS_H */
