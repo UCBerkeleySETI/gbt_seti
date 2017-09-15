@@ -771,7 +771,7 @@ pthread_mutex_init(&(rawinput.lock), NULL);
 pthread_mutex_init(&(rawinput.donelock), NULL);
 
 
-pthread_create (&raw_read_th0, NULL, (void *) &raw_read_ring, (void *) &gpu_spec[0]);
+pthread_create (&raw_read_th0, NULL, (void * (*)(void*)) &raw_read_ring, (void *) &gpu_spec[0]);
 
 int threadcheck = 8;
 int flag=0;
@@ -806,13 +806,13 @@ while(1) {
 								 // launch accumulate / disk write thread 							 
 
 								if (i == 3) {
-								   pthread_create (&accumwrite_th3, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[3]);
+								   pthread_create (&accumwrite_th3, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[3]);
 								} else if (i == 2) {
-								   pthread_create (&accumwrite_th2, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[2]);
+								   pthread_create (&accumwrite_th2, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[2]);
 								} else if (i == 1) {
-								   pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
+								   pthread_create (&accumwrite_th1, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[1]);
 								} else if (i == 0) {
-								   pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
+								   pthread_create (&accumwrite_th0, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[0]);
 								}
 
 							 }
@@ -1475,7 +1475,7 @@ chanbytes_subint_total = gpu_spec->rawinput->pf.sub.bytes_per_subint / gpu_spec-
 
 for(i = 0; i < gpu_spec->rawinput->elements; i++) {
 	gpu_spec->rawinput->data[i] = (unsigned char *) calloc(gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan, sizeof(unsigned char) );	
-	gpu_spec->rawinput->headers[i] = malloc(sizeof(struct hdrinfo));
+	gpu_spec->rawinput->headers[i] = (struct hdrinfo *) malloc(sizeof(struct hdrinfo));
 }
 
 startindx = gpu_spec->rawinput->gf.packetindex;

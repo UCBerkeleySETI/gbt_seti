@@ -920,13 +920,13 @@ do{
 								 /* launch accumulate / disk write thread */								 
 
 								if (i == 3) {
-								   pthread_create (&accumwrite_th3, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[3]);
+								   pthread_create (&accumwrite_th3, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[3]);
 								} else if (i == 2) {
-								   pthread_create (&accumwrite_th2, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[2]);
+								   pthread_create (&accumwrite_th2, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[2]);
 								} else if (i == 1) {
-								   pthread_create (&accumwrite_th1, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[1]);
+								   pthread_create (&accumwrite_th1, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[1]);
 								} else if (i == 0) {
-								   pthread_create (&accumwrite_th0, NULL, (void *) &accumulate_write_single, (void *) &gpu_spec[0]);
+								   pthread_create (&accumwrite_th0, NULL, (void * (*)(void*)) &accumulate_write_single, (void *) &gpu_spec[0]);
 								}
 
 							 }

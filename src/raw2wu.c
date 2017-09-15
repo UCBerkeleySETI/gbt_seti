@@ -547,7 +547,7 @@ int unpack_samples(unsigned char * raw, unsigned char * dest, long int count, in
 	 float * samples;
 	 float quantlookup[4];
 
-	 samples = malloc(sizeof(float) * count * 2);
+	 samples = (float *) malloc(sizeof(float) * count * 2);
 
 	 quantlookup[0] = 3.3358750;
 	 quantlookup[1] = 1.0;
