@@ -53,6 +53,9 @@ static void HandleCufftError( cufftResult err,
 #define HANDLE_CUFFT_ERROR( err ) (HandleCufftError( err, __FILE__, __LINE__ ))
 
 
+// Instead of copying the "strings_equal" function from one of several source
+// files in this directory(!), just define it as a macro.
+#define strings_equal(a,b) (!strcmp(a,b))
 
 
 struct gpu_input {
