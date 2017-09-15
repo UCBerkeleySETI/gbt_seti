@@ -1,7 +1,9 @@
 #define MAXSIZE 134000000
 #define RING_ELEMENTS 8
 #define SPINFILE "/home/obs/triggers/gpuspec_spin"
+#ifndef _GNU_SOURCE
 #define _GNU_SOURCE
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
