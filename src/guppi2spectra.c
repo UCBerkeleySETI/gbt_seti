@@ -19,6 +19,7 @@
 #include <pthread.h>
 #include "filterbank.h"
 #include "fcntl.h"
+#include "imswap.h"
 
 
 static void HandleError( cudaError_t err,
