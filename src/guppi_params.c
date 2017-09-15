@@ -41,12 +41,12 @@
         }                                                                    	 \
     }																		 	 \
   }
-#define get_int(key, param, def) {                                           	 \
+#define get_int_debugout(key, param, def, debugout) {                                           	 \
   {																		     	 \
 		char tmpstr[48];													 	 \
         if (hgeti4(buf, (key), &(param))==0) {                               	 \
         	 if (hgets(buf, (key), (48), (tmpstr))==0) {                     	 \
-				 if (DEBUGOUT)                                               	 \
+				 if (debugout)                                               	 \
 					 printf("Warning:  %s not in status shm!\n", (key));     	 \
 				 (param) = (def);                                            	 \
              } else {													     	 \
@@ -55,6 +55,10 @@
         }                                                               		 \
     }																			 \
     }
+
+#define get_int(key, param, def) get_int_debugout(key, param, def, DEBUGOUT)
+#define get_int_quiet(key, param, def) get_int_debugout(key, param, def, 0)
+
 //atoi
 #define get_lon(key, param, def) {                                      		 \
         {                                                               		 \
@@ -188,7 +192,7 @@ void guppi_read_subint_params(char *buf,
 
     // Backend HW parameters
     get_int("ACC_LEN", g->decimation_factor, 0);
-    get_int("NBITSADC", g->n_bits_adc, 8);
+    get_int_quiet("NBITSADC", g->n_bits_adc, 8);
     get_int("PFB_OVER", g->pfb_overlap, 4);
 
     // Check fold mode 
@@ -344,7 +348,10 @@ void guppi_read_obs_params(char *buf,
     get_str("PROJID", p->hdr.project_id, 24, "Unknown");
     get_str("FD_POLN", p->hdr.poln_type, 8, "Unknown");
     get_str("POL_TYPE", p->hdr.poln_order, 16, "Unknown");
-    get_int("SCANNUM", p->hdr.scan_number, 1);
+    get_int_quiet("SCANNUM", p->hdr.scan_number, -1);
+    if(p->hdr.scan_number == -1)
+        get_int_quiet("SCAN", p->hdr.scan_number, 1);
+
     get_str("DATADIR", dir, 200, ".");
     if (strcmp(p->hdr.poln_order, "AA+BB")==0 ||
         strcmp(p->hdr.poln_order, "INTEN")==0)
