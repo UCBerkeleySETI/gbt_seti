@@ -35,3 +35,4 @@ src/treedop
 src/two2eight
 src/slalib/libsla.so
 src/slalib/sla_test
+setkeys.sh
