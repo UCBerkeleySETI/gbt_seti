@@ -32,6 +32,17 @@ static void HandleError( cudaError_t err,
 }
 #define HANDLE_ERROR( err ) (HandleError( err, __FILE__, __LINE__ ))
 
+static void HandleCufftError( cufftResult err,
+                         const char *file,
+                         int line ) {
+    if (err != CUFFT_SUCCESS) {
+        printf( "%s in %s at line %d\n", _cudaGetCufftErrorEnum( err ),
+                file, line );
+        exit( EXIT_FAILURE );
+    }
+}
+#define HANDLE_CUFFT_ERROR( err ) (HandleCufftError( err, __FILE__, __LINE__ ))
+
 
 
 
@@ -632,12 +643,12 @@ for(i=0;i<gpu_spec[0].nspec;i++){
 
 	if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
 		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld (SPLIT)\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize/2);
-		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2) );		
-		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2, &worksize) );
+		HANDLE_CUFFT_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2) );
+		if(vflag>=1) HANDLE_CUFFT_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize/2, &worksize) );
 	} else {
 		if(vflag>=1) fprintf(stderr,"Planning FFT Size %ld Batch Size: %ld\n", gpu_spec[i].cufftN, gpu_spec[i].cufftbatchSize);
-		HANDLE_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );		
-		if(vflag>=1) HANDLE_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
+		HANDLE_CUFFT_ERROR( cufftPlan1d(&(gpu_spec[i].plan), gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize) );
+		if(vflag>=1) HANDLE_CUFFT_ERROR( cufftGetSize1d(gpu_spec[i].plan, gpu_spec[i].cufftN, CUFFT_C2C, gpu_spec[i].cufftbatchSize, &worksize) );
 	}
 	
 	if(vflag>=1) fprintf(stderr,"Estimated Size of Work Space: %ld\n", (long int) (((double) worksize) /  1048576.0) );
@@ -1211,12 +1222,12 @@ void gpu_channelize(struct gpu_spectrometer gpu_spec[4], long int nchannels, lon
 
 			if ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) > MAXSIZE) {
 
-				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
-				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), gpu_spec[i].b_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), CUFFT_FORWARD) ); 
+				HANDLE_CUFFT_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) );
+				HANDLE_CUFFT_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), gpu_spec[i].b_d + ((gpu_spec[i].cufftbatchSize * gpu_spec[i].cufftN) / 2), CUFFT_FORWARD) );
 
 			} else {
 
-				HANDLE_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) ); 
+				HANDLE_CUFFT_ERROR( cufftExecC2C(gpu_spec[i].plan, gpu_spec[i].a_d, gpu_spec[i].b_d, CUFFT_FORWARD) );
 			
 			}
 
