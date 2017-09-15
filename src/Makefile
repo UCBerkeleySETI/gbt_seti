@@ -99,16 +99,16 @@ guppi2spectra_gpu.o: guppi2spectra_gpu.cu
 	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o $(CUDAFLAGS)
 
 test_guppi2spectra: test_guppi2spectra.c guppi2spectra_gpu.o
-	$(CC) $(CFLAGS) -fno-strict-aliasing test_guppi2spectra.c -o $@ guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
+	$(CC) $(CFLAGS) -fno-strict-aliasing test_guppi2spectra.c -o $@ guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lstdc++
 
 gpuspec: guppi2spectra.c guppi2spectra_gpu.o $(SLALIB)
-	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
+	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra.c -o gpuspec $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla -lstdc++
 
 gpuspec2: guppi2spectra2.c guppi2spectra_gpu.o $(SLALIB)
-	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra2.c -o gpuspec2 $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
+	$(CC) $(CFLAGS) -fno-strict-aliasing guppi2spectra2.c -o gpuspec2 $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla -lstdc++
 	
 raw2wu: raw2wu.c guppi2spectra_gpu.o $(SLALIB)
-	$(CC) $(CFLAGS) -fno-strict-aliasing raw2wu.c -o raw2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla
+	$(CC) $(CFLAGS) -fno-strict-aliasing raw2wu.c -o raw2wu $(OBJS) guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS) -lsla -lstdc++
 
 slalib: $(SLALIB)
 
