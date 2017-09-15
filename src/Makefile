@@ -76,6 +76,10 @@ SLAOBJS = slalib/addet.o slalib/afin.o slalib/airmas.o slalib/altaz.o           
 	slalib/veri.o slalib/vers.o slalib/vn.o slalib/vxv.o slalib/wait.o           \
 	slalib/xy2xy.o slalib/zd.o
 
+ifeq ($(DEBUG),1)
+  CFLAGS += -ggdb -O1
+endif
+
 SLALIB = slalib/libsla$(LIBSUFFIX)
 
 all: $(SLALIB) $(PROGS) $(GPU_PROGS)
