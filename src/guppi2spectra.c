@@ -720,7 +720,10 @@ src_dej = strtod(tempbufl, (char **) NULL);
 if(vflag>=1) fprintf(stderr,"Writing filterbank headers...\n");
 for(i=0;i<gpu_spec[0].nspec;i++){
 	sprintf(gpu_spec[i].filename, "%s%04ld.fil",partfilename,i);
-	gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb");
+	if(!(gpu_spec[i].filterbank_file = fopen(gpu_spec[i].filename, "wb"))) {
+	    perror(gpu_spec[i].filename);
+	    exit(1);
+	}
 
 	foff =  fabs(rawinput.pf.hdr.df)/gpu_spec[i].cufftN * -1;
 	nchans = gpu_spec[i].cufftN * rawinput.pf.hdr.nchan;
@@ -732,7 +735,10 @@ for(i=0;i<gpu_spec[0].nspec;i++){
  }
 
  sprintf(filname, "%s.headers",partfilename);
- rawinput.headerfile = fopen(filname, "wb");
+ if(!(rawinput.headerfile = fopen(filname, "wb"))) {
+     perror(filname);
+     exit(1);
+ }
 
 
 
@@ -750,7 +756,10 @@ do{
 			  printf("filename is %s\n",filname);
 			  if(exists(filname)){
 				 printf("opening %s\n",filname);				
-				 rawinput.fil = fopen(filname, "rb");			 
+				 if(!(rawinput.fil = fopen(filname, "rb"))) {
+				     perror(filname);
+				     exit(1);
+				 }
 				 //filehandle = open(filname, O_RDONLY);
 				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) fseek(rawinput.fil, rawinput.first_file_skip, SEEK_CUR);  
 //				 if(rawinput.curfile == 0 && rawinput.first_file_skip != 0) lseek(filehandle, rawinput.first_file_skip, SEEK_CUR);  
