@@ -20,7 +20,7 @@ else
 endif
 
 CUDAFLAGS = --std=c++11 
-CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include -I/usr/local/include -I/usr/local/include/libbson-1.0 -I/usr/local/include/libmongoc-1.0
+CFLAGS = -Wno-unused-result -O3 -Wall -Werror=return-local-addr -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include -I/usr/local/include -I/usr/local/include/libbson-1.0 -I/usr/local/include/libmongoc-1.0
 PROGS = test_psrfits_read \
 	raw_quant raw_read massage_vpm \
 	treedop raw_head two2eight filterbanksearch s3test filterbanksearchdoppler baryacc
