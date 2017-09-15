@@ -34,9 +34,11 @@ int obits, sumifs, headerless, headerfile, swapout, invert_band;
 int compute_spectra, do_vanvleck, hanning, hamming, zerolagdump;
 int headeronly;
 char ifstream[8];
-int swapout;
 
+/* Defined in header.h, but included here for documenation purposes */
+#if 0
 double src_raj;        /* Source RA  (J2000) in hhmmss.ss */
 double src_dej;        /* Source DEC (J2000) in ddmmss.ss */
 double az_start;       /* Starting azimuth in deg */
 double za_start;       /* Starting zenith angle in deg */
+#endif
