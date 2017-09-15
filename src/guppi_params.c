@@ -25,7 +25,7 @@
 #define SOL 299792458.0
 #endif
 
-#define DEBUGOUT 0
+#define DEBUGOUT 1
 
 #define get_dbl(key, param, def) {                                           	 \
   {																		     	 \

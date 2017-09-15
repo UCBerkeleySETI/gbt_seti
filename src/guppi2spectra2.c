@@ -1631,7 +1631,7 @@ do{
 							pthread_mutex_lock(&(gpu_spec->rawinput->lock));
 							
 							segment = (gpu_spec->rawinput->in++) & (gpu_spec->rawinput->elements - 1);
-							memcpy(gpu_spec->rawinput->data[segment], channelbuffer, (size_t) gpu_spec->rawinput->nsamples * gpu_spec->rawinput->pf.hdr.nchan * 4);
+							memcpy(gpu_spec->rawinput->data[segment], channelbuffer, (size_t) gpu_spec->rawinput->chanbytes * gpu_spec->rawinput->pf.hdr.nchan);
 							memcpy(gpu_spec->rawinput->headers[segment], &(gpu_spec->rawinput->pf.hdr), sizeof(struct hdrinfo));
 							
 							//printf("Index: %d\n",segment);

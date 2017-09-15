@@ -1,3 +1,4 @@
+#define _GLIBCXX_USE_CXX11_ABI 0
 #define MAXSIZE 134000000
 
 #include <stdio.h>

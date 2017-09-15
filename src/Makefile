@@ -19,6 +19,7 @@ else
         LIBCMD = -dynamiclib
 endif
 
+CUDAFLAGS = --std=c++11 
 CFLAGS = -Wno-unused-result -O3 -Wall -DFOLD_USE_INTRINSICS -I$(OPT64)/include -I/usr/include/cfitsio -I/usr/include/mysql -I$(CUDA)/include -I/usr/local/include -I/usr/local/include/libbson-1.0 -I/usr/local/include/libmongoc-1.0
 PROGS = test_psrfits_read \
 	raw_quant raw_read massage_vpm \
@@ -28,7 +29,7 @@ OBJS  = guppi_status.o guppi_databuf.o guppi_udp.o guppi_error.o \
 	guppi_params.o guppi_time.o median.o setimysql.o imswap.o\
 	write_psrfits.o read_psrfits.o misc_utils.o read_filterbank_header.o filterbankutil.o \
 	fold.o polyco.o hget.o hput.o sla.o downsample.o barycenter.o chkio.o s3util.o
-LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib -ls3 -lmongoc-1.0 -lbson-1.0
+LIBS = -L$(OPT64)/lib -I$(OPT64)/include -L$(CUDA)/lib64 -lfftw3f_threads -lcfitsio -lm -lgsl -lgslcblas -lpthread -I/usr/include/cfitsio -lfftw3f -L/usr/lib64/mysql -lmysqlclient -lcufft -lcudart -Lslalib -ls3 -lmongoc-1.0 -lbson-1.0 -lstdc++ 
 
 SLAOBJS = slalib/addet.o slalib/afin.o slalib/airmas.o slalib/altaz.o                \
 	slalib/amp.o slalib/ampqk.o slalib/aop.o slalib/aoppa.o slalib/aoppat.o      \
@@ -91,7 +92,7 @@ $(SLALIB): $(SLAOBJS)
 	cd slalib ; $(FC) $(LIBCMD) -o $(notdir $(SLALIB)) -fno-second-underscore *.o
 
 guppi2spectra_gpu.o: guppi2spectra_gpu.cu
-	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o
+	$(CUDAC) -c guppi2spectra_gpu.cu -o guppi2spectra_gpu.o $(CUDAFLAGS)
 
 test_guppi2spectra: test_guppi2spectra.c guppi2spectra_gpu.o
 	$(CC) $(CFLAGS) -fno-strict-aliasing test_guppi2spectra.c -o $@ guppi2spectra_gpu.o $(LIBS) $(THREAD_LIBS)
