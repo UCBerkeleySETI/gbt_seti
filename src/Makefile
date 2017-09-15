@@ -120,12 +120,14 @@ slalib-check: slalib
 	cd slalib ; $(FC) -o sla_test sla_test.f -fno-second-underscore -L. -lsla
 	cd slalib; ./sla_test
 
-install: install-progs install-libs
+install: install-listen_sh install-progs install-libs
+
+install-listen_sh:
 	mkdir -p $(prefix)
 	echo 'test -e $(CUDA)/cuda.sh && source $(CUDA)/cuda.sh'       > $(prefix)/listen.sh
 	echo 'export LD_LIBRARY_PATH="$${LD_LIBRARY_PATH}:$(LIBDIR)"' >> $(prefix)/listen.sh
 	echo 'export PATH="$${PATH}:$(BINDIR)"'                       >> $(prefix)/listen.sh
-	cat setkeys.sh >> $(prefix)/listen.sh
+	echo 'source $$(dirname $${BASH_SOURCE[0]})/setkeys.sh'       >> $(prefix)/listen.sh
 	
 install-progs: $(PROGS) $(GPU_PROGS)
 	mkdir -p $(BINDIR)
@@ -142,7 +144,7 @@ clean:
 	rm -f $(PROGS) $(GPU_PROGS) *~ *.o 
 	rm -f $(SLALIB) $(SLAOBJS) slalib/sla_test
 
-.PHONY: all slalib gpu check slalib-check install install-progs install-libs tags clean
+.PHONY: all slalib gpu check slalib-check install install-listen_sh install-progs install-libs tags clean
 
 .SECONDEXPANSION:
 $(PROGS): $$@.c $(OBJS) $(SLALIB)
