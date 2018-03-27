@@ -281,7 +281,7 @@ S3Status responsePropertiesCallback (const S3ResponseProperties *properties, voi
         printf("x-amz-meta-%s: %s\n", properties->metaData[i].name,
                properties->metaData[i].value);
     }
-#ifdef HAS_USESSERVERSIDEENCRYPTION
+#ifndef USE_LIBS3_20
     if (properties->usesServerSideEncryption) {
         printf("UsesServerSideEncryption: true\n");
     }

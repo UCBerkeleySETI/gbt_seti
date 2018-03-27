@@ -588,8 +588,11 @@ long int candsearch_doppler(float thresh, struct filterbank_input *input, struct
 						   fitslen;
 
 				   do {
-					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+				           S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 
@@ -631,8 +634,11 @@ long int candsearch_doppler(float thresh, struct filterbank_input *input, struct
 						   fitslen;
 					
 				   do {
-					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+                                           S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+                                           S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 				   if (statusG != S3StatusOK) {
@@ -941,8 +947,11 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 						   fitslen;
 
 				   do {
-					   S3_put_object(&bucketContext, onfitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+                                           S3_put_object(&bucketContext, onfitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+                                           S3_put_object(&bucketContext, onfitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 
@@ -990,8 +999,11 @@ long int candsearch_doppler_mongo(float thresh, struct filterbank_input *input, 
 						   fitslen;
 					
 				   do {
-					   S3_put_object(&bucketContext, offfitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+                                           S3_put_object(&bucketContext, offfitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+                                           S3_put_object(&bucketContext, offfitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 				   if (statusG != S3StatusOK) {
@@ -1226,8 +1238,12 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 						   fitslen;
 
 				   do {
-					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
+
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 
@@ -1259,8 +1275,11 @@ long int candsearch_onoff(float *diff_spectrum, long int candwidth, float thresh
 						   fitslen;
 					
 				   do {
-					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0,
-									 0, &putObjectHandler, &data);
+#ifdef USE_LIBS3_20
+				           S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, &putObjectHandler, &data);
+#else
+					   S3_put_object(&bucketContext, fitsname, fitslen, &putProperties, 0, 0, &putObjectHandler, &data);
+#endif
 				   } while (S3_status_is_retryable(statusG) && should_retry());
 
 				   if (statusG != S3StatusOK) {
