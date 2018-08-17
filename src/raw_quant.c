@@ -15,7 +15,7 @@ extern void guppi_read_obs_params(char *buf,
                                      struct psrfits *p);
 
 
-inline int quantize_2bit(struct psrfits *pf, double * mean, double * std);
+extern int quantize_2bit(struct psrfits *pf, double * mean, double * std);
 
 int compute_stat(struct psrfits *pf, double *mean, double *std);
 
